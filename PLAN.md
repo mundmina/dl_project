@@ -97,7 +97,7 @@ CSCI 494: Deep Learning · Amina Abdikalyk, Islam Sanatbek, Tomiris Rakymbay, As
 ```
 dl_project/                     # github.com/mundmina/dl_project
 ├── PLAN.md · README.md · requirements.txt
-├── configs/                    # resnet_A.yaml (p_swap 0.0), resnet_B.yaml (p_swap 0.5), hog_svm.yaml
+├── configs/                    # resnet_A.yaml (p_swap 0.0), resnet_B.yaml (p_swap 0.5)   [готово]
 ├── splits/                     # train/val/test CSV — коммитим
 ├── manifests/                  # background_pools.csv, val/test_swapped.csv — коммитим
 ├── src/bgbias/
@@ -106,18 +106,18 @@ dl_project/                     # github.com/mundmina/dl_project
 │   ├── backgrounds.py          # пулы фонов Places365, manifests                    [готово]
 │   ├── compose.py              # trimap → alpha, замена фона, fg-only, bg-only      [готово]
 │   ├── datasets.py             # Dataset для всех условий + случайная замена        [готово]
-│   ├── models.py               # ResNet-18 с новой головой
-│   ├── train.py                # цикл обучения, checkpoints, логирование
-│   ├── evaluate.py             # условия → metrics.json
-│   ├── hog_svm.py              # baseline
+│   ├── models.py               # ResNet-18 с новой головой                         [готово]
+│   ├── train.py                # цикл обучения, checkpoints, логирование           [готово]
+│   ├── evaluate.py             # условия → metrics.json                            [готово]
+│   ├── hog_svm.py              # baseline                                          [готово]
 │   ├── gradcam.py
 │   └── utils.py                # seed, пути                                         [готово]
 ├── notebooks/
 │   ├── 00_setup.ipynb          # [готово]
-│   ├── 01_data.ipynb           # [готово, нужно запустить в Colab]
-│   ├── 02_hog_svm.ipynb
-│   ├── 03_train_resnet.ipynb
-│   ├── 04_evaluate.ipynb
+│   ├── 01_data.ipynb           # [готово, запущен]
+│   ├── 02_hog_svm.ipynb        # [готово, не запускался]
+│   ├── 03_train_resnet.ipynb   # [готово, не запускался]
+│   ├── 04_evaluate.ipynb       # [готово, не запускался]
 │   ├── 05_analysis.ipynb
 │   └── 06_demo.ipynb
 ├── results/                    # metrics.json, data_audit.csv — коммитим
