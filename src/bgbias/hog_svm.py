@@ -1,15 +1,22 @@
-"""Classical baseline: HOG features + linear SVM, trained on original images only."""
+"""Classical baseline: HOG features + linear SVM, trained on original images only.
+
+HOG gives 8100 features for ~3k training images, so a linear SVM on raw features separates
+the training set perfectly and overfits (and is slow to converge for larger C). PCA to a few
+hundred components before the SVM fixes both.
+"""
 import os
 
 import numpy as np
 from joblib import Parallel, delayed
 from PIL import Image
 from skimage.feature import hog
+from sklearn.decomposition import PCA
 from sklearn.pipeline import make_pipeline
 from sklearn.preprocessing import StandardScaler
 from sklearn.svm import LinearSVC
 
-C_GRID = (1e-4, 1e-3, 1e-2, 1e-1, 1.0)
+C_GRID = (1e-5, 1e-4, 1e-3, 1e-2, 1e-1)
+PCA_COMPONENTS = 256
 
 
 def hog_features(img, size=128):
@@ -30,5 +37,6 @@ def extract(dataset, size=128):
     return np.concatenate(parts)
 
 
-def make_svm(C):
-    return make_pipeline(StandardScaler(), LinearSVC(C=C, dual="auto", max_iter=5000))
+def make_svm(C, n_components=PCA_COMPONENTS):
+    return make_pipeline(StandardScaler(), PCA(n_components, random_state=0),
+                         LinearSVC(C=C, dual="auto", max_iter=5000))
