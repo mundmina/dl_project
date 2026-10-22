@@ -110,15 +110,15 @@ dl_project/                     # github.com/mundmina/dl_project
 │   ├── train.py                # цикл обучения, checkpoints, логирование           [готово]
 │   ├── evaluate.py             # условия → metrics.json                            [готово]
 │   ├── hog_svm.py              # baseline                                          [готово]
-│   ├── gradcam.py
+│   ├── gradcam.py                                                                  [готово]
 │   └── utils.py                # seed, пути                                         [готово]
 ├── notebooks/
 │   ├── 00_setup.ipynb          # [готово]
 │   ├── 01_data.ipynb           # [готово, запущен]
-│   ├── 02_hog_svm.ipynb        # [готово, не запускался]
-│   ├── 03_train_resnet.ipynb   # [готово, не запускался]
-│   ├── 04_evaluate.ipynb       # [готово, не запускался]
-│   ├── 05_analysis.ipynb
+│   ├── 02_hog_svm.ipynb        # [готово, запущен]
+│   ├── 03_train_resnet.ipynb   # [готово, запущен]
+│   ├── 04_evaluate.ipynb       # [готово, запущен]
+│   ├── 05_analysis.ipynb       # [готово, не запускался]
 │   └── 06_demo.ipynb
 ├── results/                    # metrics.json, data_audit.csv — коммитим
 └── report/                     # LaTeX, figures/
