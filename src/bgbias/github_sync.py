@@ -60,9 +60,9 @@ def push(repo_dir, message, paths=RESULT_PATHS, branch="main"):
     existing = [p for p in paths if (Path(repo_dir) / p).exists()]
     git("add", "--", *existing)
     if git("diff", "--cached", "--quiet", check=False).returncode == 0:
-        print("nothing new to push")
-        return
-    git("commit", "-m", message)
+        print("nothing new to commit")  # still push: an earlier failed push may have left a local commit
+    else:
+        git("commit", "-m", message)
     git("pull", "--rebase", url, branch)
     git("push", url, f"HEAD:{branch}")
     print("pushed to GitHub")
