@@ -1,0 +1,9 @@
+# Case study on Waterbirds: ResNet-18, plain fine-tuning.
+# Must match waterbirds_B.yaml except name and p_swap.
+name: waterbirds_A
+p_swap: 0.0
+epochs: 10
+batch_size: 64
+lr_backbone: 1.0e-4
+lr_head: 1.0e-3
+weight_decay: 1.0e-4

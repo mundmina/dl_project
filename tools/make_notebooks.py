@@ -1343,3 +1343,138 @@ demo.launch(share=True)
 (OUT / "05b_probing.ipynb").write_text(json.dumps(probing_nb, indent=1, ensure_ascii=False))
 (OUT / "06_demo.ipynb").write_text(json.dumps(demo_nb, indent=1, ensure_ascii=False))
 print("ok 03e, 04b, 05b, 06")
+
+
+case_nb = nb([
+    md(f"""
+# 07 · Case study: Waterbirds — does our fix work on a standard shortcut benchmark?
+{colab_badge("07_case_waterbirds.ipynb")}
+
+**Runtime → T4 GPU → Run all.** ~1.5–2 ч: скачивание (~480 MB, один раз), маски (~10 мин, один раз), 2 модели × 3 seed.
+
+Background bias на породах — маленький удобный случай большой проблемы shortcut learning. Здесь проверяем,
+переносится ли наш метод на **Waterbirds** (Sagawa et al., 2020): птицы из CUB на фонах Places, и в train
+95% водоплавающих птиц сидят на воде, а 95% сухопутных — на суше. Модель легко учится отличать воду от суши
+вместо птиц. Главная метрика — **worst-group accuracy**: точность на самой трудной группе (обычно «водоплавающая
+птица на суше»).
+
+- `waterbirds_A` — обычное дообучение ResNet-18;
+- `waterbirds_B` — наш метод без изменений: с вероятностью 0.5 фон заменяется случайной сценой Places365.
+  Ручных масок нет — их делает сеть сегментации DeepLabV3 (класс «bird»).
+
+Checkpoint выбирается по средней точности на val, без групповых меток (честное сравнение).
+"""),
+    SETUP,
+    code("""
+import torch
+assert torch.cuda.is_available(), "Runtime -> Change runtime type -> T4 GPU"
+"""),
+    PROJECT,
+    code("""
+import numpy as np
+import pandas as pd
+from bgbias import waterbirds as W
+from bgbias.train import load_config
+
+device = torch.device("cuda")
+WB_ROOT = W.prepare_waterbirds()
+wb = W.load_metadata(WB_ROOT)
+print(pd.crosstab([wb.split, wb.y.map({0: "landbird", 1: "waterbird"})], wb.place.map({0: "land", 1: "water"})))
+masks = W.compute_masks(WB_ROOT, wb, device, DRIVE_ROOT / "data" / "waterbirds_masks.npz")
+found = np.mean([W.unpack_mask(m).mean() > 0.005 for m in masks.values()])
+print(f"segmentation found the bird in {found:.1%} of images")
+"""),
+    code("""
+import matplotlib.pyplot as plt
+from bgbias.datasets import build_transform
+
+bg_pool = data.bg_pool("train")
+demo = W.WaterbirdsDataset(wb[wb.split == "train"].sample(6, random_state=0), WB_ROOT, lambda im: im, masks,
+                           p_swap=1.0, bg_pool=bg_pool, places_root=data.places_root)
+torch.manual_seed(0)
+fig, axes = plt.subplots(2, 6, figsize=(18, 6))
+for i in range(6):
+    axes[0, i].imshow(W.compose.load_image(WB_ROOT / demo.df.at[i, "img_filename"]))
+    axes[0, i].set_title(W.GROUPS[demo.df.at[i, "group"]], fontsize=9)
+    axes[1, i].imshow(demo.render(i))
+for ax in axes.flat:
+    ax.axis("off")
+plt.tight_layout()
+plt.show()
+"""),
+    code("""
+CONFIGS = ["waterbirds_A", "waterbirds_B"]
+SEEDS = [0, 1, 2]
+WB_RUNS = DRIVE_ROOT / "runs_waterbirds"   # kept apart: 04 / 04b / 05b scan runs/ for 37-class Pet models
+configs = {name: load_config(f"{REPO_DIR}/configs/{name}.yaml") for name in CONFIGS}
+for seed in SEEDS:
+    for name, cfg in configs.items():
+        run_dir = WB_RUNS / f"{name}_seed{seed}"
+        print(f"=== {run_dir.name} ===")
+        W.train(cfg, seed, wb, WB_ROOT, masks, data.places_root, bg_pool, run_dir, device)
+"""),
+    md("## Test: средняя точность и точность по группам"),
+    code("""
+from bgbias.models import build_model
+
+test_loader = W._loader(W.WaterbirdsDataset(wb[wb.split == "test"], WB_ROOT, build_transform(train=False)), 128, False, 0)
+rows = []
+for name in CONFIGS:
+    for seed in SEEDS:
+        ckpt = torch.load(WB_RUNS / f"{name}_seed{seed}" / "best.pt", map_location=device, weights_only=False)
+        model = build_model(ckpt["config"].get("arch", "resnet18"), 2, pretrained=False).to(device)
+        model.load_state_dict(ckpt["model"])
+        rows.append({"model": name, "seed": seed, **W.group_metrics(*W.predict(model, test_loader, device))})
+res = pd.DataFrame(rows)
+OUT = Path(REPO_DIR) / "results" / "waterbirds"
+OUT.mkdir(parents=True, exist_ok=True)
+res.to_csv(OUT / "test_per_run.csv", index=False)
+summary = res.drop(columns="seed").groupby("model").agg(["mean", "std"])
+summary.to_csv(OUT / "test_summary.csv")
+summary.round(3)
+"""),
+    code("""
+from matplotlib.ticker import PercentFormatter
+from bgbias.plotting import COLORS, saver, use_style
+
+use_style()
+FIG_DIR = Path(REPO_DIR) / "report" / "figures"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+save = saver(FIG_DIR)
+
+cols = ["avg_acc", "worst_group_acc", *W.GROUPS.values()]
+names = ["Average", "Worst group", *W.GROUPS.values()]
+fig, ax = plt.subplots(figsize=(10, 4))
+x = np.arange(len(cols))
+for name, key, dx in (("waterbirds_A", "resnet_A", -0.18), ("waterbirds_B", "resnet_B", 0.18)):
+    m = res[res.model == name][cols]
+    ax.bar(x + dx, m.mean(), width=0.34, yerr=m.std(), capsize=3, color=COLORS[key],
+           label="A: plain fine-tuning" if name.endswith("A") else "B: random background swap (ours)")
+    for xi, v in zip(x + dx, m.mean()):
+        ax.annotate(f"{v:.0%}", (xi, v), xytext=(0, 4), textcoords="offset points", ha="center", fontsize=8)
+ax.set_xticks(x, names, fontsize=9)
+ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+ax.set_ylim(0, 1.05)
+ax.set_ylabel("Test accuracy (mean ± std, 3 seeds)")
+ax.set_title("Waterbirds: background swap and the hardest groups")
+ax.legend(loc="lower left")
+save(fig, "fig9_waterbirds")
+"""),
+    code("""
+import shutil
+from bgbias.github_sync import sync
+
+for name in CONFIGS:
+    for seed in SEEDS:
+        src = WB_RUNS / f"{name}_seed{seed}" / "history.json"
+        dst = OUT / "runs" / f"{name}_seed{seed}.json"
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy(src, dst)
+shutil.copytree(OUT, DRIVE_ROOT / "results" / "waterbirds", dirs_exist_ok=True)
+shutil.copytree(FIG_DIR, DRIVE_ROOT / "figures", dirs_exist_ok=True)
+sync(REPO_DIR, "Case study: Waterbirds")
+"""),
+])
+
+(OUT / "07_case_waterbirds.ipynb").write_text(json.dumps(case_nb, indent=1, ensure_ascii=False))
+print("ok 07")

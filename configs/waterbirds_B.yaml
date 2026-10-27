@@ -1,0 +1,9 @@
+# Case study on Waterbirds: ResNet-18, our fix, random Places365 background with p = 0.5.
+# Must match waterbirds_A.yaml except name and p_swap.
+name: waterbirds_B
+p_swap: 0.5
+epochs: 10
+batch_size: 64
+lr_backbone: 1.0e-4
+lr_head: 1.0e-3
+weight_decay: 1.0e-4

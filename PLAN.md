@@ -52,6 +52,7 @@ CSCI 494: Deep Learning · Amina Abdikalyk, Islam Sanatbek, Tomiris Rakymbay, As
    Гиперпараметры заданы заранее (рецепт ResNet-18; scratch — 40 эпох, lr 1e-3), по test ничего не подбираем.
 2. `04_evaluate` → `04b_external_stanford_dogs` (настоящие фото, 21 общая порода) → `05_analysis`
    (fig5 архитектуры, fig6 методы) → `05b_probing` (fig7: насколько фон декодируется из признаков).
+2b. `07_case_waterbirds` — кейс: наш метод на бенчмарке Waterbirds (worst-group accuracy), ~1.5–2 ч.
 3. `06_demo` — Gradio-демо для защиты (ссылка живёт 72 ч, запускать в день презентации).
 4. Отчёт (LaTeX) и презентация.
 5. По желанию: перезапуск `02` с расширенной сеткой C (лучший C был на краю, 1e-5).

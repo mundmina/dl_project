@@ -31,6 +31,7 @@ caches dataset archives in `MyDrive/bgbias/data/`.
 | [`05_analysis`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/05_analysis.ipynb) | Report figures, bootstrap CI, per-breed gaps, flip examples, Grad-CAM, architecture and method comparison |
 | [`05b_probing`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/05b_probing.ipynb) | Linear probe: how well the background scene can be decoded from each model's features |
 | [`06_demo`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/06_demo.ipynb) | Gradio demo: upload a pet photo, swap the background, compare A and B |
+| [`07_case_waterbirds`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/07_case_waterbirds.ipynb) | Case study: our background swap on the Waterbirds shortcut benchmark (worst-group accuracy) |
 
 Notebooks 03–05 push their small outputs (histories, predictions, tables, figures) to this repo at the end;
 this needs a Colab secret `GITHUB_TOKEN` (fine-grained, Contents read/write on this repo).
