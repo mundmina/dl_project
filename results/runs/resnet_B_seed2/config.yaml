@@ -1,0 +1,11 @@
+batch_size: 64
+blur_sigma: 1.5
+epochs: 15
+img_size: 224
+include_border: true
+lr_backbone: 0.0001
+lr_head: 0.001
+name: resnet_B
+p_swap: 0.5
+seed: 2
+weight_decay: 0.0001

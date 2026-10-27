@@ -1,0 +1,13 @@
+model,seed,condition,cam_on_pet,pet_area
+resnet_A,0,original,0.7901507,0.5897711
+resnet_A,0,swapped,0.8030591,0.5897711
+resnet_A,1,original,0.7881145,0.5897711
+resnet_A,1,swapped,0.80304515,0.5897711
+resnet_A,2,original,0.79391783,0.5897711
+resnet_A,2,swapped,0.8030719,0.5897711
+resnet_B,0,original,0.7960519,0.5897711
+resnet_B,0,swapped,0.8009984,0.5897711
+resnet_B,1,original,0.79687876,0.5897711
+resnet_B,1,swapped,0.8015563,0.5897711
+resnet_B,2,original,0.799271,0.5897711
+resnet_B,2,swapped,0.80380553,0.5897711
