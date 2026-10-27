@@ -650,7 +650,7 @@ for model, offset in (("resnet_A", -0.12), ("resnet_B", 0.12)):
                     ha="left" if offset > 0 else "right", va="center", fontsize=8, color=INK2)
 ax.set_xticks(range(len(CONDS)), [label for _, label in CONDS])
 ax.set_xlim(-0.6, len(CONDS) - 0.4)
-ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+ax.yaxis.set_major_formatter(PercentFormatter(1.0, decimals=1))
 ax.set_ylabel("Test accuracy (mean ± std, 3 seeds)")
 ax.set_title("Background swap hurts model A; model B is almost unaffected")
 ax.legend(loc="lower left")
@@ -710,7 +710,7 @@ ax.set_yticks(y, [f"{b.replace('_', ' ')} ({s})" for b, s in zip(breeds.index, b
 ax.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
 ax.set_xlabel("Accuracy drop when the background is swapped (mean of 3 seeds)")
 ax.set_title("Per-breed background dependence")
-ax.legend(loc="lower right")
+ax.legend(loc="upper left")   # top-left is empty: the most affected breeds sit at the top right
 save(fig, "fig3_per_breed_gap")
 
 print(breeds.groupby("species")[["gap_A", "gap_B"]].mean().round(4))
