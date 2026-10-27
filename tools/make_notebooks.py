@@ -56,6 +56,12 @@ print("code version:", commit)
 subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", f"{REPO_DIR}/requirements.txt"], check=True)
 if f"{REPO_DIR}/src" not in sys.path:
     sys.path.insert(0, f"{REPO_DIR}/src")
+try:  # ask for secret access now, not at the end of a long run (the prompt times out unattended)
+    from google.colab import userdata
+    userdata.get("GITHUB_TOKEN")
+    print("GITHUB_TOKEN: ok")
+except Exception as e:  # noqa: BLE001
+    print(f"GITHUB_TOKEN not available ({type(e).__name__}): results will not be pushed to GitHub")
 ''')
 
 DATA = code('''
