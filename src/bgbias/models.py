@@ -21,6 +21,14 @@ def build_model(arch, num_classes, pretrained=True):
     return model
 
 
+def strip_head(model, arch):
+    """Replace the classification layer with Identity in place: the model then returns penultimate features."""
+    parent_name, _, child = ARCHS[arch][2].rpartition(".")
+    parent = model.get_submodule(parent_name) if parent_name else model
+    setattr(parent, child, nn.Identity())
+    return model
+
+
 def build_resnet18(num_classes, pretrained=True):
     return build_model("resnet18", num_classes, pretrained)
 

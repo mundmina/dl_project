@@ -1,0 +1,13 @@
+# Method: saliency penalty ("right for the right reasons"), lambda = 1, original images only.
+# Same as resnet_A except rrr_lambda; trained in fp32 (see train.py).
+name: resnet_rrr1
+p_swap: 0.0
+rrr_lambda: 1.0
+epochs: 15
+batch_size: 64
+lr_backbone: 1.0e-4
+lr_head: 1.0e-3
+weight_decay: 1.0e-4
+img_size: 224
+include_border: true
+blur_sigma: 1.5

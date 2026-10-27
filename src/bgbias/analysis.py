@@ -20,6 +20,8 @@ METHODS = {
     "CutMix": "resnet_cutmix",
     "Blurred background": "resnet_blur",
     "Gray background": "resnet_gray",
+    "Saliency penalty, λ = 1": "resnet_rrr1",
+    "Saliency penalty, λ = 10": "resnet_rrr10",
     "Places365 swap (B)": "resnet_B",
 }
 
@@ -45,6 +47,14 @@ def bootstrap_gap_difference(tables, model_a="resnet_A", model_b="resnet_B", n_b
     return {"gap_A": gap_a.mean(), "gap_B": gap_b.mean(), "difference": diff.mean(),
             "ci_low": np.percentile(boots, 2.5), "ci_high": np.percentile(boots, 97.5),
             "p_le_0": float((boots <= 0).mean())}
+
+
+def bootstrap_accuracy_difference(tables, model_a, model_b, condition, n_boot=2000, seed=0):
+    """Paired bootstrap over images of accuracy(B) - accuracy(A) in one condition, seeds averaged."""
+    diff = correctness(tables, model_b, condition).mean(1) - correctness(tables, model_a, condition).mean(1)
+    rng = np.random.default_rng(seed)
+    boots = np.array([diff[rng.integers(0, len(diff), len(diff))].mean() for _ in range(n_boot)])
+    return {"difference": diff.mean(), "ci_low": np.percentile(boots, 2.5), "ci_high": np.percentile(boots, 97.5)}
 
 
 def per_breed_gap(tables, model):

@@ -650,7 +650,7 @@ analysis_nb = nb([
 5. Примеры: A ошибается после замены фона, B — нет; Grad-CAM
 6. Grad-CAM в цифрах: доля внимания на животном
 7. Архитектуры: ResNet-18 / scratch / ResNet-50 / ConvNeXt-T / Swin-T, A vs B
-8. Методы: CutMix, размытый фон, серый фон, замена фона
+8. Методы: CutMix, размытый фон, серый фон, saliency penalty, замена фона
 '''),
     SETUP,
     code('''
@@ -677,23 +677,10 @@ FIG_DIR.mkdir(parents=True, exist_ok=True)
 TAB_DIR.mkdir(parents=True, exist_ok=True)
 device = torch.device("cuda")
 
-# Fixed identity colours (validated palette: first three categorical slots).
-COLORS = {"resnet_A": "#2a78d6", "resnet_B": "#eb6834", "hog_svm": "#1baf7a"}
-LABELS = {"resnet_A": "ResNet-18 A (original images)", "resnet_B": "ResNet-18 B (background swap, p = 0.5)",
-          "hog_svm": "HOG + SVM"}
-INK, INK2, RULE, SURFACE = "#0b0b0b", "#52514e", "#d6d5d0", "#fcfcfb"
-plt.rcParams.update({
-    "figure.facecolor": SURFACE, "axes.facecolor": SURFACE, "savefig.facecolor": SURFACE,
-    "text.color": INK, "axes.labelcolor": INK2, "xtick.color": INK2, "ytick.color": INK2,
-    "axes.edgecolor": RULE, "axes.spines.top": False, "axes.spines.right": False,
-    "axes.grid": True, "axes.grid.axis": "y", "grid.color": "#ebeae6", "grid.linewidth": 0.8,
-    "axes.titlesize": 11, "axes.titleweight": "bold", "axes.titlelocation": "left",
-    "font.size": 10, "lines.linewidth": 2, "legend.frameon": False,
-})
+from bgbias.plotting import COLORS, INK, INK2, LABELS, RULE, SURFACE, saver, use_style
 
-def save(fig, name):
-    fig.savefig(FIG_DIR / f"{name}.png", dpi=200, bbox_inches="tight")
-    plt.show()
+use_style()
+save = saver(FIG_DIR)
 
 tables = {p.name.removesuffix("_predictions.csv"): pd.read_csv(p) for p in sorted(PRED_DIR.glob("*_predictions.csv"))}
 per_run = pd.DataFrame({run: E.summarize(t) for run, t in tables.items()}).T
@@ -831,15 +818,19 @@ save(fig, "fig4_flip_examples_gradcam")
 ## 6. Grad-CAM в цифрах
 
 Доля «внимания» Grad-CAM, попадающая на животное (по trimap-маске), на 500 случайных тестовых изображениях,
-все 3 seed каждой модели. Для сравнения — доля площади кадра, которую занимает животное.
+все seed каждой модели ResNet-18 (A, B и методы из `03b`, `03e`). Для saliency penalty это прямая проверка:
+обучение штрафовало внимание на фон — видно ли это по Grad-CAM? Для сравнения — доля площади кадра, которую занимает животное.
 Grad-CAM на рисунке выше — иллюстрация; вывод делаем по этим цифрам.
 '''),
     code('''
 rng = np.random.default_rng(0)
 sample = np.sort(rng.choice(len(data.splits[SPLIT]), size=500, replace=False))
 rows = []
-for model_name in ("resnet_A", "resnet_B"):
+CAM_MODELS = ["resnet_A", "resnet_B", "resnet_gray", "resnet_blur", "resnet_cutmix", "resnet_rrr1", "resnet_rrr10"]
+for model_name in [m for m in CAM_MODELS if (RUNS / f"{m}_seed0" / "best.pt").exists()]:
     for seed in (0, 1, 2):
+        if not (RUNS / f"{model_name}_seed{seed}" / "best.pt").exists():
+            continue
         model, cfg = load_checkpoint(RUNS / f"{model_name}_seed{seed}" / "best.pt", data.num_classes, device)
         for c in ("original", "swapped"):
             share, area = foreground_share(model, data, SPLIT, c, sample, device)
@@ -945,3 +936,410 @@ sync(REPO_DIR, "Analysis: figures, bootstrap, per-breed gaps, Grad-CAM")
 
 (OUT / "05_analysis.ipynb").write_text(json.dumps(analysis_nb, indent=1, ensure_ascii=False))
 print("ok 05")
+
+
+rrr_nb = nb([
+    md(f"""
+# 03e · Train ResNet-18 with a saliency penalty ("right for the right reasons")
+{colab_badge("03e_train_rrr.ipynb")}
+
+**Runtime → T4 GPU → Run all.** 2 конфигурации × 3 seed, ~2.5–3.5 ч (можно в несколько заходов).
+
+Другой подход: не менять данные, а менять функцию потерь (Ross et al., 2017). Модель видит только оригинальные фото,
+как A, но к cross-entropy добавляется штраф: доля градиента по входу (saliency), попавшая на фон по маске.
+Штраф лежит в [0, 1], поэтому λ сравнима с loss: `resnet_rrr1` (λ = 1) и `resnet_rrr10` (λ = 10).
+Обучение в fp32 (двойной backward), поэтому медленнее остальных ResNet-18.
+В истории обучения есть колонка `train_bg_share` — она должна падать.
+{RESUME_NOTE}
+"""),
+    *train_cells(["resnet_rrr1", "resnet_rrr10"]),
+])
+
+external_nb = nb([
+    md(f"""
+# 04b · External test: Stanford Dogs (real photos, no cut-and-paste)
+{colab_badge("04b_external_stanford_dogs.ipynb")}
+
+**Runtime → T4 GPU → Run all.** ~40–60 мин; первый запуск скачивает Stanford Dogs (~780 MB) и кладёт в Drive.
+
+Все наши «новые фоны» до сих пор были искусственными (вырезали и вставили). Здесь — настоящие фото 21 нашей
+породы собак из другого датасета: другие фотографы, другие места. Обучение не трогаем, только оценка.
+
+- `full` — фото целиком; `crop` — только рамка с собакой (большая часть фона убрана).
+- `acc` — по всем 37 классам; `acc_dog` — только среди 21 породы, которые есть в Stanford Dogs.
+
+Оговорка для отчёта: Stanford Dogs собран из ImageNet, поэтому ImageNet-предобученные модели видели эти фото
+при предобучении. Это одинаково для A и B, так что сравнение честное; модели `scratch_*` их не видели.
+"""),
+    SETUP,
+    code("""
+import torch
+assert torch.cuda.is_available(), "Runtime -> Change runtime type -> T4 GPU"
+"""),
+    PROJECT,
+    code("""
+import numpy as np
+import pandas as pd
+from bgbias import analysis as A, stanford_dogs as SD
+from bgbias.datasets import build_transform
+from bgbias.models import load_checkpoint
+
+SD_ROOT = SD.prepare_stanford_dogs()
+breed_to_label = dict(zip(data.splits["test"].breed, data.splits["test"].label))
+index = SD.load_index(SD_ROOT, breed_to_label)
+print(len(index), "photos of", index.breed.nunique(), "breeds")
+index.breed.value_counts().to_frame().T
+"""),
+    code("""
+device = torch.device("cuda")
+OUT = Path(REPO_DIR) / "results" / "stanford_dogs"
+CACHE = DRIVE_ROOT / "results" / "stanford_dogs"   # predictions from an earlier session are reused
+OUT.mkdir(parents=True, exist_ok=True)
+CACHE.mkdir(parents=True, exist_ok=True)
+views = {v: SD.StanfordDogs(index, SD_ROOT, v, build_transform(train=False)) for v in ("full", "crop")}
+dog_labels = sorted(index.label.unique())
+
+tables, rows = {}, []
+for run in sorted(p.parent for p in RUNS.glob("*_seed*/best.pt")):
+    name = f"{run.name}_predictions.csv"
+    if (CACHE / name).exists():
+        table = pd.read_csv(CACHE / name)
+    else:
+        model, cfg = load_checkpoint(run / "best.pt", data.num_classes, device)
+        table = index[["path", "breed", "label"]].copy()
+        for v, ds in views.items():
+            table[f"pred_{v}"], table[f"pred_dog_{v}"] = SD.predict(model, ds, device, dog_labels)
+        table.to_csv(CACHE / name, index=False)
+        del model
+        torch.cuda.empty_cache()
+    table.to_csv(OUT / name, index=False)
+    tables[run.name] = table
+    row = {"run": run.name, "model": A.model_name(run.name)}
+    row.update({f"acc_{c}": (table[f"pred_{c}"] == table.label).mean() for c in ("full", "crop", "dog_full", "dog_crop")})
+    rows.append(row)
+    print(run.name, {k: round(v, 3) for k, v in row.items() if k.startswith("acc")})
+per_run = pd.DataFrame(rows).set_index("run")
+per_run.to_csv(OUT / "summary_per_run.csv")
+"""),
+    md("## A vs B на настоящих фото"),
+    code("""
+oxford = pd.read_csv(DRIVE_ROOT / "results" / "test" / "summary_per_run.csv", index_col=0)
+oxford["model"] = [A.model_name(r) for r in oxford.index]
+
+def mean_std(df, model, col):
+    v = df.loc[df.model == model, col]
+    return v.mean(), v.std()
+
+rows = []
+groups = {**{f: pair for f, pair in A.FAMILIES.items()},
+          **{label: ("resnet_A", m) for label, m in A.METHODS.items() if m not in ("resnet_A", "resnet_B")}}
+for label, (ma, mb) in groups.items():
+    if not ((per_run.model == ma).any() and (per_run.model == mb).any()):
+        continue
+    boot = A.bootstrap_accuracy_difference(tables, ma, mb, "full")
+    for variant, m in (("A", ma), ("B", mb)):
+        r = {"group": label, "variant": variant, "model": m}
+        for col in ("acc_full", "acc_crop", "acc_dog_full"):
+            r[col], r[col + "_std"] = mean_std(per_run, m, col)
+        r["oxford_acc_original"], _ = mean_std(oxford, m, "acc_original")
+        rows.append(r)
+    rows[-1].update({"B_minus_A_full": boot["difference"], "ci_low": boot["ci_low"], "ci_high": boot["ci_high"]})
+external = pd.DataFrame(rows)
+TAB = Path(REPO_DIR) / "results" / "analysis"
+TAB.mkdir(parents=True, exist_ok=True)
+external.to_csv(TAB / "stanford_dogs.csv", index=False)
+external.drop(columns=[c for c in external.columns if c.endswith("_std")]).round(3)
+"""),
+    code("""
+import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
+from bgbias.plotting import COLORS, INK2, saver, use_style
+
+use_style()
+FIG_DIR = Path(REPO_DIR) / "report" / "figures"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+save = saver(FIG_DIR)
+
+fams = [f for f in A.FAMILIES if (external.group == f).any()]
+d = external[external.group.isin(fams)]
+fig, ax = plt.subplots(figsize=(8, 0.6 * len(fams) + 1.6))
+y = np.arange(len(fams))
+for variant, key, dy in (("A", "resnet_A", -0.12), ("B", "resnet_B", 0.12)):
+    v = d[d.variant == variant].set_index("group").loc[fams]
+    ax.errorbar(v.acc_full, y + dy, xerr=v.acc_full_std, fmt="o", ms=7, color=COLORS[key], capsize=3,
+                label="A: original images" if variant == "A" else "B: background swap p = 0.5")
+ax.set_yticks(y, fams)
+ax.invert_yaxis()
+ax.grid(axis="y", visible=False)
+ax.grid(axis="x", visible=True, color="#ebeae6")
+ax.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+ax.set_xlabel("Accuracy on Stanford Dogs photos (37 classes, mean ± std over seeds)")
+ax.set_title("External test on real photos: does background training transfer?")
+ax.legend(loc="lower right")
+save(fig, "fig8_stanford_dogs")
+
+for label in groups:
+    r = external[(external.group == label) & (external.variant == "B")]
+    if len(r):
+        r = r.iloc[0]
+        print(f"{label:28s} B - A = {r.B_minus_A_full:+.2%}  95% CI [{r.ci_low:+.2%}, {r.ci_high:+.2%}]")
+"""),
+    code("""
+import shutil
+from bgbias.github_sync import sync
+
+shutil.copytree(FIG_DIR, DRIVE_ROOT / "figures", dirs_exist_ok=True)
+shutil.copy(TAB / "stanford_dogs.csv", DRIVE_ROOT / "results" / "analysis" / "stanford_dogs.csv")
+sync(REPO_DIR, "External test on Stanford Dogs")
+"""),
+])
+
+probing_nb = nb([
+    md(f"""
+# 05b · Probing: how much do the features know about the background?
+{colab_badge("05b_probing.ipynb")}
+
+**Runtime → T4 GPU → Run all.** ~40–60 мин. Ничего не обучает, кроме маленьких линейных классификаторов.
+
+Берём признаки из предпоследнего слоя каждой модели на test-картинках с заменённым фоном и учим логистическую
+регрессию угадывать **категорию сцены фона** (87 категорий Places365, случайное угадывание ≈ 1.1%), 5-fold CV.
+Фон назначен случайно и с породой не связан, поэтому для распознавания пород эта информация бесполезна.
+Чем лучше её можно достать из признаков, тем больше модель «держит в голове» фон.
+
+Для сравнения — те же сети с ImageNet-весами без дообучения и случайно инициализированная ResNet-18.
+"""),
+    SETUP,
+    code("""
+import torch
+assert torch.cuda.is_available(), "Runtime -> Change runtime type -> T4 GPU"
+"""),
+    PROJECT,
+    code("""
+import numpy as np
+import pandas as pd
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.model_selection import StratifiedKFold, cross_val_score
+from sklearn.pipeline import make_pipeline
+from sklearn.preprocessing import StandardScaler
+from bgbias import analysis as A
+from bgbias.models import build_model, load_checkpoint, strip_head
+from bgbias.project import make_dataset
+from bgbias.train import make_loader
+
+device = torch.device("cuda")
+SPLIT = "test"
+scenes = data.manifests[SPLIT].set_index("image_id").loc[data.splits[SPLIT].image_id, "bg_category"].to_numpy()
+print(len(set(scenes)), "scene categories, chance =", f"{1 / len(set(scenes)):.1%}")
+loader = make_loader(make_dataset(data, SPLIT, condition="swapped"), 128, False, 0, 2)
+
+@torch.no_grad()
+def features(model):
+    model.eval()
+    out = []
+    for x, _ in loader:
+        with torch.autocast("cuda"):
+            out.append(model(x.to(device, non_blocking=True)).float().cpu())
+    return torch.cat(out).numpy()
+
+def probe(feats):
+    clf = make_pipeline(StandardScaler(), PCA(128, random_state=0), LogisticRegression(max_iter=2000, C=0.5))
+    return cross_val_score(clf, feats, scenes, cv=StratifiedKFold(5, shuffle=True, random_state=0)).mean()
+"""),
+    code("""
+CACHE = DRIVE_ROOT / "results" / "analysis" / "probing_runs.csv"   # finished runs are skipped on a rerun
+CACHE.parent.mkdir(parents=True, exist_ok=True)
+done = pd.read_csv(CACHE) if CACHE.exists() else pd.DataFrame(columns=["run", "model", "scene_acc"])
+
+def record(run, model_name, make_model):
+    global done
+    if run in set(done.run):
+        return
+    model = make_model().to(device)
+    acc = probe(features(model))
+    done = pd.concat([done, pd.DataFrame([{"run": run, "model": model_name, "scene_acc": acc}])], ignore_index=True)
+    done.to_csv(CACHE, index=False)
+    print(f"{run:24s} scene accuracy {acc:.1%}")
+    del model
+    torch.cuda.empty_cache()
+
+# references: ImageNet features without fine-tuning, and an untrained network
+for arch in ("resnet18", "resnet50", "convnext_tiny", "swin_t"):
+    record(f"imagenet_{arch}", f"imagenet_{arch}", lambda: strip_head(build_model(arch, data.num_classes), arch))
+record("random_resnet18", "random_resnet18",
+       lambda: strip_head(build_model("resnet18", data.num_classes, pretrained=False), "resnet18"))
+
+for run in sorted(p.parent for p in RUNS.glob("*_seed*/best.pt")):
+    def make(run=run):
+        model, cfg = load_checkpoint(run / "best.pt", data.num_classes, device)
+        return strip_head(model, cfg.get("arch", "resnet18"))
+    record(run.name, A.model_name(run.name), make)
+"""),
+    code("""
+import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
+from bgbias.plotting import COLORS, INK2, saver, use_style
+
+use_style()
+FIG_DIR = Path(REPO_DIR) / "report" / "figures"
+TAB = Path(REPO_DIR) / "results" / "analysis"
+FIG_DIR.mkdir(parents=True, exist_ok=True)
+TAB.mkdir(parents=True, exist_ok=True)
+save = saver(FIG_DIR)
+
+stats = done.groupby("model").scene_acc.agg(["mean", "std", "count"])
+stats["std"] = stats["std"].fillna(0)   # references have a single run
+stats.to_csv(TAB / "probing.csv")
+REF = {"ResNet-18": "imagenet_resnet18", "ResNet-18 (scratch)": "random_resnet18", "ResNet-50": "imagenet_resnet50",
+       "ConvNeXt-T": "imagenet_convnext_tiny", "Swin-T": "imagenet_swin_t"}
+fams = [f for f, (ma, mb) in A.FAMILIES.items() if ma in stats.index and mb in stats.index]
+meths = [(label, m) for label, m in A.METHODS.items() if m in stats.index]
+
+fig, axes = plt.subplots(1, 2, figsize=(12, 0.55 * max(len(fams), len(meths)) + 1.8))
+ax = axes[0]
+y = np.arange(len(fams))
+for variant, key, dy in ((0, "resnet_A", -0.12), (1, "resnet_B", 0.12)):
+    m = [A.FAMILIES[f][variant] for f in fams]
+    ax.errorbar(stats.loc[m, "mean"], y + dy, xerr=stats.loc[m, "std"].fillna(0), fmt="o", ms=7,
+                color=COLORS[key], capsize=3, label="A: original images" if variant == 0 else "B: background swap")
+ref = [stats.loc[REF[f], "mean"] if REF[f] in stats.index else np.nan for f in fams]
+ax.plot(ref, y, "|", ms=14, mew=2, color=INK2, label="before fine-tuning (ImageNet / random)")
+ax.set_yticks(y, fams)
+ax.invert_yaxis()
+ax.set_title("Architectures")
+ax.legend(loc="lower right", fontsize=8)
+ax = axes[1]
+y = np.arange(len(meths))
+ax.errorbar([stats.loc[m, "mean"] for _, m in meths], y, xerr=[stats.loc[m, "std"] for _, m in meths],
+            fmt="o", ms=7, color=INK2, capsize=3)
+ax.set_yticks(y, [label for label, _ in meths])
+ax.invert_yaxis()
+ax.set_title("Methods (ResNet-18)")
+for ax in axes:
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", visible=True, color="#ebeae6")
+    ax.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+    ax.set_xlabel("Background scene decoded from features (linear probe, 87 classes)")
+fig.tight_layout()
+save(fig, "fig7_probing")
+stats.round(3)
+"""),
+    code("""
+import shutil
+from bgbias.github_sync import sync
+
+shutil.copytree(FIG_DIR, DRIVE_ROOT / "figures", dirs_exist_ok=True)
+sync(REPO_DIR, "Probing: background scene decodability from features")
+"""),
+])
+
+demo_nb = nb([
+    md(f"""
+# 06 · Demo: change the background, watch the prediction
+{colab_badge("06_demo.ipynb")}
+
+**Runtime → T4 GPU → Run all**, затем открой ссылку `https://….gradio.live` из последней ячейки
+(работает 72 часа, можно открыть на защите с любого компьютера).
+
+Загружаешь фото кошки или собаки → сеть сегментации (DeepLabV3) вырезает животное → выбираешь новый фон →
+модели A и B (ResNet-18, seed 0) показывают топ-3 пород для оригинала и для нового фона.
+"""),
+    SETUP,
+    code("""
+import torch
+assert torch.cuda.is_available(), "Runtime -> Change runtime type -> T4 GPU"
+import subprocess, sys
+subprocess.run([sys.executable, "-m", "pip", "install", "-q", "gradio"], check=True)
+"""),
+    PROJECT,
+    code("""
+import numpy as np
+import pandas as pd
+from PIL import Image, ImageFilter
+from torchvision.models.segmentation import DeepLabV3_ResNet50_Weights, deeplabv3_resnet50
+from bgbias import analysis as A, compose
+from bgbias.datasets import build_transform
+from bgbias.models import load_checkpoint
+
+device = torch.device("cuda")
+models = {m: load_checkpoint(RUNS / f"{m}_seed0" / "best.pt", data.num_classes, device)[0] for m in ("resnet_A", "resnet_B")}
+breed_of = dict(zip(data.splits["test"].label, data.splits["test"].breed))
+to_tensor = build_transform(train=False)
+
+seg_weights = DeepLabV3_ResNet50_Weights.COCO_WITH_VOC_LABELS_V1
+seg = deeplabv3_resnet50(weights=seg_weights).to(device).eval()
+seg_tf = seg_weights.transforms()
+PET_CLASSES = [seg_weights.meta["categories"].index(c) for c in ("cat", "dog")]
+
+@torch.no_grad()
+def pet_alpha(img):
+    labels = seg(seg_tf(img)[None].to(device))["out"][0].argmax(0).cpu().numpy()
+    mask = Image.fromarray(np.isin(labels, PET_CLASSES).astype(np.uint8) * 255).resize(img.size, Image.BILINEAR)
+    return np.asarray(mask.filter(ImageFilter.GaussianBlur(1.5)), dtype=np.float32) / 255
+
+@torch.no_grad()
+def top3(img):
+    x = to_tensor(img)[None].to(device)
+    out = {}
+    for m, model in models.items():
+        p = model(x).softmax(1)[0].cpu()
+        out[m] = {breed_of[i].replace("_", " "): float(p[i]) for i in p.topk(3).indices.tolist()}
+    return out
+
+rng = np.random.default_rng(0)
+bg_paths = [data.places_root / p for p in rng.choice(data.bg_pool("test"), 12, replace=False)]
+
+# example photos: test images where every A seed flips on the swapped background and every B seed does not
+tables = {p.name.removesuffix("_predictions.csv"): pd.read_csv(p)
+          for p in (DRIVE_ROOT / "results" / "test").glob("resnet_[AB]_seed*_predictions.csv")}
+idx, _ = A.flip_examples(tables, "resnet_A", "resnet_B", n=6, seed=1)
+examples = [str(data.pet_root / "images" / f"{data.splits['test'].image_id.iat[i]}.jpg") for i in idx]
+print(len(examples), "example photos")
+"""),
+    code("""
+import gradio as gr
+
+def run(pet, bg_index, bg_upload):
+    if pet is None:
+        raise gr.Error("Загрузи фото кошки или собаки")
+    pet = pet.convert("RGB")
+    alpha = pet_alpha(pet)
+    if alpha.mean() < 0.01:
+        raise gr.Error("Не нашёл на фото кошку или собаку")
+    bg = bg_upload.convert("RGB") if bg_upload is not None else compose.load_image(bg_paths[bg_index or 0])
+    swapped = compose.swap_background(pet, alpha, bg)
+    before, after = top3(pet), top3(swapped)
+    return swapped, before["resnet_A"], before["resnet_B"], after["resnet_A"], after["resnet_B"]
+
+with gr.Blocks(title="Background bias demo") as demo:
+    gr.Markdown("## Меняется ли порода, если поменять фон?\\n"
+                "**A** обучена на обычных фото, **B** — с заменой фона в половине случаев.")
+    bg_index = gr.State(0)
+    with gr.Row():
+        pet = gr.Image(type="pil", label="Фото питомца")
+        with gr.Column():
+            gallery = gr.Gallery(value=[str(p) for p in bg_paths], label="Новый фон (кликни)", columns=4,
+                                 height=260, allow_preview=False)
+            bg_upload = gr.Image(type="pil", label="…или загрузи свой фон", height=160)
+    def pick(evt: gr.SelectData):   # gradio passes the click only to a parameter annotated SelectData
+        return evt.index
+    gallery.select(pick, None, bg_index)
+    go = gr.Button("Поменять фон", variant="primary")
+    swapped = gr.Image(label="С новым фоном", height=320)
+    with gr.Row():
+        a_before = gr.Label(num_top_classes=3, label="A — оригинал")
+        b_before = gr.Label(num_top_classes=3, label="B — оригинал")
+        a_after = gr.Label(num_top_classes=3, label="A — новый фон")
+        b_after = gr.Label(num_top_classes=3, label="B — новый фон")
+    gr.Examples(examples=[[e] for e in examples], inputs=pet, label="Примеры из test (A здесь ошибалась на чужом фоне)")
+    go.click(run, [pet, bg_index, bg_upload], [swapped, a_before, b_before, a_after, b_after])
+
+demo.launch(share=True)
+"""),
+])
+
+(OUT / "03e_train_rrr.ipynb").write_text(json.dumps(rrr_nb, indent=1, ensure_ascii=False))
+(OUT / "04b_external_stanford_dogs.ipynb").write_text(json.dumps(external_nb, indent=1, ensure_ascii=False))
+(OUT / "05b_probing.ipynb").write_text(json.dumps(probing_nb, indent=1, ensure_ascii=False))
+(OUT / "06_demo.ipynb").write_text(json.dumps(demo_nb, indent=1, ensure_ascii=False))
+print("ok 03e, 04b, 05b, 06")

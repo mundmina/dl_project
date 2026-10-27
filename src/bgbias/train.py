@@ -1,6 +1,12 @@
 """Training. Within one architecture, A and B share everything except `p_swap` in the config.
 Optional config keys: arch (default resnet18), pretrained (default true), bg_mode (default places),
-cutmix (probability of applying CutMix to a batch, default 0).
+cutmix (probability of applying CutMix to a batch, default 0),
+rrr_lambda (weight of the saliency penalty, default 0; "right for the right reasons", Ross et al. 2017).
+
+Saliency penalty: input gradient of the summed log-probabilities, squared and summed over channels;
+the penalty is the share of that gradient energy that falls on the background (by the trimap mask).
+It lies in [0, 1], so rrr_lambda is comparable to the cross-entropy. These runs use fp32: the
+double backward through fp16 input gradients underflows.
 
 Checkpoints go to `run_dir` (on Drive) every epoch; re-running `train` with the same
 run_dir resumes from `last.pt`. The loader generator is reseeded every epoch from
@@ -51,6 +57,14 @@ def _save(obj, path):
     os.replace(tmp, path)
 
 
+def background_share(model_out, x, mask):
+    """Per image: share of the squared input-gradient energy on the background. Differentiable."""
+    logp = model_out.float().log_softmax(1).sum()
+    (grad,) = torch.autograd.grad(logp, x, create_graph=True)
+    energy = grad.pow(2).sum(1, keepdim=True)
+    return (energy * (1 - mask)).flatten(1).sum(1) / energy.flatten(1).sum(1).clamp_min(1e-12)
+
+
 def train(cfg, seed, data, run_dir, device=None):
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_dir = Path(run_dir)
@@ -59,8 +73,11 @@ def train(cfg, seed, data, run_dir, device=None):
 
     common = dict(include_border=cfg["include_border"], blur_sigma=cfg["blur_sigma"], img_size=cfg["img_size"])
     workers = cfg.get("num_workers", os.cpu_count())
+    rrr = cfg.get("rrr_lambda", 0.0)
+    assert not (rrr > 0 and cfg.get("cutmix", 0.0) > 0), "saliency penalty and CutMix are not combined"
+    use_amp = device.type == "cuda" and rrr == 0
     train_loader = make_loader(make_dataset(data, "train", train=True, p_swap=cfg["p_swap"],
-                                            bg_mode=cfg.get("bg_mode", "places"), **common),
+                                            bg_mode=cfg.get("bg_mode", "places"), return_mask=rrr > 0, **common),
                                cfg["batch_size"], True, seed, workers)
     # val swapped is for monitoring only; checkpoints are selected on val original.
     val_loaders = {c: make_loader(make_dataset(data, "val", condition=c, **common),
@@ -74,7 +91,7 @@ def train(cfg, seed, data, run_dir, device=None):
     p_cutmix = cfg.get("cutmix", 0.0)
     cutmix = v2.CutMix(num_classes=data.num_classes)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg["epochs"] * len(train_loader))
-    scaler = torch.amp.GradScaler(device.type, enabled=device.type == "cuda")
+    scaler = torch.amp.GradScaler(device.type, enabled=use_amp)
     loss_fn = nn.CrossEntropyLoss()
 
     start_epoch, best_acc, history = 0, -1.0, []
@@ -94,14 +111,26 @@ def train(cfg, seed, data, run_dir, device=None):
         model.train()
         t0 = time.time()
         loss_sum = correct = total = 0
-        for x, y in train_loader:
+        bg_share_sum = 0.0
+        for batch in train_loader:
+            if rrr > 0:
+                x, mask, y = batch
+                mask = mask.to(device, non_blocking=True)
+            else:
+                x, y = batch
             x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
             target = y
             if p_cutmix > 0 and torch.rand(1).item() < p_cutmix:
                 x, target = cutmix(x, y)   # soft labels; train_acc below still counts the hard label
-            with torch.autocast(device.type, enabled=device.type == "cuda"):
+            if rrr > 0:
+                x.requires_grad_(True)
+            with torch.autocast(device.type, enabled=use_amp):
                 out = model(x)
                 loss = loss_fn(out.float(), target)
+            if rrr > 0:
+                share = background_share(out, x, mask)
+                loss = loss + rrr * share.mean()
+                bg_share_sum += share.sum().item()
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.step(optimizer)
@@ -112,6 +141,8 @@ def train(cfg, seed, data, run_dir, device=None):
             total += len(y)
 
         row = {"epoch": epoch, "train_loss": loss_sum / total, "train_acc": correct / total}
+        if rrr > 0:
+            row["train_bg_share"] = bg_share_sum / total
         row.update({f"val_acc_{c}": accuracy(model, loader, device) for c, loader in val_loaders.items()})
         row["time_s"] = round(time.time() - t0, 1)
         history.append(row)

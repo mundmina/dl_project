@@ -6,7 +6,7 @@ from pathlib import Path
 import pandas as pd
 
 from .data_setup import prepare_pets, prepare_places
-from .datasets import PetBackgroundDataset, build_transform
+from .datasets import PetBackgroundDataset, build_joint_transform, build_transform
 from .splits import load_splits
 from .utils import DRIVE_ROOT
 
@@ -44,13 +44,13 @@ def load_project_data(repo_dir, week1_dir=DRIVE_ROOT / "week1"):
 
 
 def make_dataset(data, split, condition="original", train=False, p_swap=0.0, bg_mode="places",
-                 include_border=True, blur_sigma=1.5, img_size=224, transform="auto"):
+                 include_border=True, blur_sigma=1.5, img_size=224, transform="auto", return_mask=False):
     """transform="auto" -> standard train/eval tensor transform; None -> PIL images (e.g. for HOG)."""
     if transform == "auto":
-        transform = build_transform(train=train, size=img_size)
+        transform = build_joint_transform(img_size) if return_mask else build_transform(train=train, size=img_size)
     return PetBackgroundDataset(
         data.splits[split], data.pet_root, condition=condition, transform=transform,
         places_root=data.places_root, manifest=data.manifests.get(split),
         bg_pool=data.bg_pool("train") if p_swap > 0 else None, p_swap=p_swap, bg_mode=bg_mode,
-        include_border=include_border, blur_sigma=blur_sigma,
+        include_border=include_border, blur_sigma=blur_sigma, return_mask=return_mask,
     )

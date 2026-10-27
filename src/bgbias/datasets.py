@@ -12,6 +12,8 @@ from pathlib import Path
 import torch
 from torch.utils.data import Dataset
 from torchvision import transforms as T
+from torchvision import tv_tensors
+from torchvision.transforms import v2
 
 from . import compose
 
@@ -28,12 +30,22 @@ def build_transform(train, size=224):
     return T.Compose([T.Resize(int(size * 256 / 224)), T.CenterCrop(size), *norm])
 
 
+def build_joint_transform(size=224):
+    """Train transform applied to the image and its pet mask together (same crop and flip)."""
+    return v2.Compose([v2.ToImage(), v2.RandomResizedCrop(size, scale=(0.7, 1.0), antialias=True),
+                       v2.RandomHorizontalFlip(), v2.ToDtype(torch.float32, scale=True),
+                       v2.Normalize(IMAGENET_MEAN, IMAGENET_STD)])
+
+
 class PetBackgroundDataset(Dataset):
     def __init__(self, split_df, pet_root, condition="original", transform=None,
                  places_root=None, manifest=None, bg_pool=None, p_swap=0.0,
-                 include_border=True, blur_sigma=1.5, bg_mode="places"):
+                 include_border=True, blur_sigma=1.5, bg_mode="places", return_mask=False):
+        """return_mask: items are (image, pet mask 1xHxW, label); `transform` must then take both
+        (build_joint_transform). Used by the saliency-penalty training on original images."""
         assert condition in CONDITIONS, condition
         assert bg_mode in BG_MODES, bg_mode
+        assert not return_mask or (condition == "original" and p_swap == 0)
         if condition == "swapped":
             assert manifest is not None and places_root is not None
         if p_swap > 0:
@@ -49,6 +61,7 @@ class PetBackgroundDataset(Dataset):
         self.bg_pool = list(bg_pool) if bg_pool is not None else []
         self.p_swap = p_swap
         self.bg_mode = bg_mode
+        self.return_mask = return_mask
         self.include_border = include_border
         self.blur_sigma = blur_sigma
 
@@ -86,6 +99,10 @@ class PetBackgroundDataset(Dataset):
 
     def __getitem__(self, idx):
         img = self.render(idx)
+        if self.return_mask:
+            alpha = self._alpha(self.df.at[idx, "image_id"])
+            img, mask = self.transform(img, tv_tensors.Mask(torch.from_numpy(alpha)[None]))
+            return img, mask.as_subclass(torch.Tensor), int(self.df.at[idx, "label"])
         if self.transform is not None:
             img = self.transform(img)
         return img, int(self.df.at[idx, "label"])

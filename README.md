@@ -25,8 +25,12 @@ caches dataset archives in `MyDrive/bgbias/data/`.
 | [`03b_train_methods`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/03b_train_methods.ipynb) | ResNet-18 with other background strategies: gray background, blurred background, CutMix |
 | [`03c_train_convnext_swin`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/03c_train_convnext_swin.ipynb) | ConvNeXt-Tiny and Swin-T, A and B |
 | [`03d_train_resnet50_scratch`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/03d_train_resnet50_scratch.ipynb) | ResNet-50 and ResNet-18 from scratch, A and B |
+| [`03e_train_rrr`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/03e_train_rrr.ipynb) | ResNet-18 with a saliency penalty on the background (right for the right reasons), λ = 1 and 10 |
 | [`04_evaluate`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/04_evaluate.ipynb) | All models × all conditions → predictions, metrics, main table (test) |
+| [`04b_external_stanford_dogs`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/04b_external_stanford_dogs.ipynb) | External test on real Stanford Dogs photos (21 shared breeds), full image vs dog crop |
 | [`05_analysis`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/05_analysis.ipynb) | Report figures, bootstrap CI, per-breed gaps, flip examples, Grad-CAM, architecture and method comparison |
+| [`05b_probing`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/05b_probing.ipynb) | Linear probe: how well the background scene can be decoded from each model's features |
+| [`06_demo`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/06_demo.ipynb) | Gradio demo: upload a pet photo, swap the background, compare A and B |
 
 Notebooks 03–05 push their small outputs (histories, predictions, tables, figures) to this repo at the end;
 this needs a Colab secret `GITHUB_TOKEN` (fine-grained, Contents read/write on this repo).
