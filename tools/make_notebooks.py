@@ -38,27 +38,43 @@ def colab_badge(name):
 
 SETUP = code('''
 # Shared setup: Drive, repo, dependencies. Same cell in every notebook.
+# Colab: nothing to set. Local machine (own GPU): see LOCAL.md — open this notebook from the repo's notebooks/
+# folder and set BGBIAS_DRIVE, BGBIAS_DATA and GITHUB_TOKEN before starting Jupyter.
 REPO_URL = "https://github.com/mundmina/dl_project.git"
-REPO_DIR = "/content/dl_project"
 BRANCH = "main"
 
 import os, subprocess, sys
-from google.colab import drive
+try:
+    from google.colab import drive
+    IN_COLAB = True
+except ImportError:
+    IN_COLAB = False
 
-drive.mount("/content/drive")
-if not os.path.exists(REPO_DIR):
-    subprocess.run(["git", "clone", "-b", BRANCH, REPO_URL, REPO_DIR], check=True)
-else:  # always run the latest code from GitHub
-    subprocess.run(["git", "-C", REPO_DIR, "fetch", "origin", BRANCH], check=True)
-    subprocess.run(["git", "-C", REPO_DIR, "checkout", "-B", BRANCH, f"origin/{BRANCH}"], check=True)
+if IN_COLAB:
+    REPO_DIR = "/content/dl_project"
+    drive.mount("/content/drive")
+    if not os.path.exists(REPO_DIR):
+        subprocess.run(["git", "clone", "-b", BRANCH, REPO_URL, REPO_DIR], check=True)
+    else:  # always run the latest code from GitHub
+        subprocess.run(["git", "-C", REPO_DIR, "fetch", "origin", BRANCH], check=True)
+        subprocess.run(["git", "-C", REPO_DIR, "checkout", "-B", BRANCH, f"origin/{BRANCH}"], check=True)
+    subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", f"{REPO_DIR}/requirements.txt"], check=True)
+else:
+    REPO_DIR = os.path.abspath(os.path.join(os.getcwd(), ".."))   # notebook opened from <repo>/notebooks
+    assert os.path.exists(os.path.join(REPO_DIR, "src", "bgbias")), "open the notebook from the repo's notebooks/ folder"
+    missing = [v for v in ("BGBIAS_DRIVE", "BGBIAS_DATA") if not os.environ.get(v)]
+    assert not missing, f"set {missing} before starting Jupyter (see LOCAL.md)"
+    subprocess.run(["git", "-C", REPO_DIR, "pull", "--ff-only", "origin", BRANCH], check=True)
 commit = subprocess.run(["git", "-C", REPO_DIR, "log", "-1", "--format=%h %s"], capture_output=True, text=True).stdout
 print("code version:", commit)
-subprocess.run([sys.executable, "-m", "pip", "install", "-q", "-r", f"{REPO_DIR}/requirements.txt"], check=True)
 if f"{REPO_DIR}/src" not in sys.path:
     sys.path.insert(0, f"{REPO_DIR}/src")
+# DataLoader workers on Windows start fresh interpreters: they find bgbias through PYTHONPATH, not sys.path
+os.environ["PYTHONPATH"] = os.pathsep.join(p for p in (f"{REPO_DIR}/src", os.environ.get("PYTHONPATH")) if p)
 try:  # ask for secret access now, not at the end of a long run (the prompt times out unattended)
-    from google.colab import userdata
-    userdata.get("GITHUB_TOKEN")
+    if not os.environ.get("GITHUB_TOKEN"):
+        from google.colab import userdata
+        userdata.get("GITHUB_TOKEN")
     print("GITHUB_TOKEN: ok")
 except Exception as e:  # noqa: BLE001
     print(f"GITHUB_TOKEN not available ({type(e).__name__}): results will not be pushed to GitHub")

@@ -3,6 +3,7 @@
 Needs a Colab secret GITHUB_TOKEN: fine-grained token, Contents read/write on mundmina/dl_project.
 Large files (datasets, checkpoints, HOG features) never go to git.
 """
+import os
 import shutil
 import subprocess
 from pathlib import Path
@@ -39,12 +40,14 @@ def collect_results(repo_dir, drive_root=DRIVE_ROOT):
 
 def push(repo_dir, message, paths=RESULT_PATHS, branch="main"):
     """Commit `paths` and push to GitHub. Prints a note and returns if no token is configured."""
-    try:
-        from google.colab import userdata
-        token = userdata.get("GITHUB_TOKEN")
-    except Exception as e:  # noqa: BLE001 - missing secret, access not granted, not in Colab
-        print(f"skip push to GitHub ({type(e).__name__}): add the GITHUB_TOKEN secret in Colab")
-        return
+    token = os.environ.get("GITHUB_TOKEN")   # local machine
+    if not token:
+        try:
+            from google.colab import userdata
+            token = userdata.get("GITHUB_TOKEN")
+        except Exception as e:  # noqa: BLE001 - missing secret, access not granted, not in Colab
+            print(f"skip push to GitHub ({type(e).__name__}): add the GITHUB_TOKEN secret in Colab")
+            return
     token = token.strip()
     if token.count("github_pat_") > 1:
         print("skip push to GitHub: GITHUB_TOKEN contains several tokens pasted together, keep only one")

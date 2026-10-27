@@ -5,8 +5,10 @@ from pathlib import Path
 import numpy as np
 
 # Colab layout: data is copied to fast local disk, archives are cached on Drive.
-LOCAL_DATA = Path("/content/data")
-DRIVE_ROOT = Path("/content/drive/MyDrive/bgbias")
+# On a local machine set BGBIAS_DATA (any local folder) and BGBIAS_DRIVE (the bgbias folder as
+# Google Drive for desktop shows it, e.g. "G:/My Drive/bgbias"), so checkpoints land in the shared Drive.
+LOCAL_DATA = Path(os.environ.get("BGBIAS_DATA", "/content/data"))
+DRIVE_ROOT = Path(os.environ.get("BGBIAS_DRIVE", "/content/drive/MyDrive/bgbias"))
 
 PET_SUBDIR = "oxford-iiit-pet"
 PLACES_SUBDIR = "places365"
