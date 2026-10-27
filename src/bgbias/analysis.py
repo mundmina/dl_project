@@ -5,6 +5,24 @@ import pandas as pd
 # Background-swap probability of every trained configuration (ablation axis).
 P_SWAP = {"resnet_A": 0.0, "resnet_p025": 0.25, "resnet_B": 0.5, "resnet_p100": 1.0}
 
+# Architecture comparison: label -> (model without swap, model with swap p = 0.5).
+FAMILIES = {
+    "ResNet-18": ("resnet_A", "resnet_B"),
+    "ResNet-18 (scratch)": ("scratch_A", "scratch_B"),
+    "ResNet-50": ("resnet50_A", "resnet50_B"),
+    "ConvNeXt-T": ("convnext_A", "convnext_B"),
+    "Swin-T": ("swin_A", "swin_B"),
+}
+
+# Ways to handle the background during training, all on pretrained ResNet-18.
+METHODS = {
+    "None (A)": "resnet_A",
+    "CutMix": "resnet_cutmix",
+    "Blurred background": "resnet_blur",
+    "Gray background": "resnet_gray",
+    "Places365 swap (B)": "resnet_B",
+}
+
 
 def model_name(run_name):
     return run_name.rsplit("_seed", 1)[0] if "_seed" in run_name else run_name

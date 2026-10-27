@@ -1,0 +1,12 @@
+# Method: own background Gaussian-blurred with p = 0.5. Same as resnet_B except bg_mode.
+name: resnet_blur
+p_swap: 0.5
+bg_mode: blur
+epochs: 15
+batch_size: 64
+lr_backbone: 1.0e-4
+lr_head: 1.0e-3
+weight_decay: 1.0e-4
+img_size: 224
+include_border: true
+blur_sigma: 1.5

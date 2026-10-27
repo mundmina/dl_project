@@ -1,0 +1,12 @@
+# Architecture resnet50, original images. Must match resnet50_B.yaml except name and p_swap.
+name: resnet50_A
+arch: resnet50
+p_swap: 0.0
+epochs: 15
+batch_size: 64
+lr_backbone: 1.0e-4
+lr_head: 1.0e-3
+weight_decay: 1.0e-4
+img_size: 224
+include_border: true
+blur_sigma: 1.5

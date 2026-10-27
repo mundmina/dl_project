@@ -417,6 +417,60 @@ val_metrics
 '''),
 ])
 
+def train_cells(configs, seeds_note=""):
+    """Shared body of the training notebooks: train every config x seed, summary, push."""
+    return [
+        code(f'''
+CONFIGS = {configs!r}
+SEEDS = [0, 1, 2]
+'''),
+        SETUP,
+        code('''
+import torch
+assert torch.cuda.is_available(), "Runtime -> Change runtime type -> T4 GPU"
+'''),
+        PROJECT,
+        code('''
+import pandas as pd
+from bgbias.train import load_config, train
+
+configs = {name: load_config(f"{REPO_DIR}/configs/{name}.yaml") for name in CONFIGS}
+pd.DataFrame(configs)   # paired configs (X_A / X_B) must differ only in name and p_swap
+'''),
+        code('''
+# seed-major order: if Colab stops early, every config already has seed 0
+histories = {}
+for seed in SEEDS:
+    for name, cfg in configs.items():
+        run_dir = RUNS / f"{name}_seed{seed}"
+        print(f"=== {run_dir.name} ===")
+        histories[(name, seed)] = pd.DataFrame(train(cfg, seed, data, run_dir))
+'''),
+        code('''
+rows = []
+for (name, seed), h in histories.items():
+    best = h.loc[h.val_acc_original.idxmax()]
+    rows.append({"model": name, "seed": seed, "best_epoch": int(best.epoch),
+                 "val_original": best.val_acc_original, "val_swapped": best.val_acc_swapped,
+                 "gap": best.val_acc_original - best.val_acc_swapped})
+best = pd.DataFrame(rows)
+print(best.groupby("model")[["val_original", "val_swapped", "gap"]].agg(["mean", "std"]).round(4))
+best.round(4)
+'''),
+        code('''
+from bgbias.github_sync import sync
+sync(REPO_DIR, "Training histories: " + ", ".join(CONFIGS))
+'''),
+    ]
+
+
+RESUME_NOTE = """
+Уже обученные запуски пропускаются, поэтому повторный Run all безопасен.
+Если Colab отключился — просто запусти ноутбук снова, обучение продолжится с последней эпохи.
+Checkpoints: `MyDrive/bgbias/runs/<name>_seed<k>/`. В конце истории обучения пушатся в GitHub.
+После всех 03* ноутбуков — `04_evaluate`, затем `05_analysis`.
+"""
+
 train_nb = nb([
     md(f'''
 # 03 · Train ResNet-18: A, B and the p ablation
@@ -436,46 +490,54 @@ train_nb = nb([
 Checkpoints: `MyDrive/bgbias/runs/<name>_seed<k>/` (`best.pt` по val original, `last.pt` для продолжения).
 Если Colab отключился — просто запусти ноутбук снова, обучение продолжится с последней эпохи.
 '''),
-    code('''
-CONFIGS = ["resnet_A", "resnet_B", "resnet_p025", "resnet_p100"]
-SEEDS = [0, 1, 2]
-'''),
-    SETUP,
-    code('''
-import torch
-assert torch.cuda.is_available(), "Runtime -> Change runtime type -> T4 GPU"
-'''),
-    PROJECT,
-    code('''
-import pandas as pd
-from bgbias.train import load_config, train
+    *train_cells(["resnet_A", "resnet_B", "resnet_p025", "resnet_p100"]),
+])
 
-configs = {name: load_config(f"{REPO_DIR}/configs/{name}.yaml") for name in CONFIGS}
-pd.DataFrame(configs)   # columns must differ only in name and p_swap
+methods_nb = nb([
+    md(f'''
+# 03b · Train ResNet-18: other ways to fight background bias
+{colab_badge("03b_train_methods.ipynb")}
+
+**Runtime → T4 GPU → Run all.** 3 конфигурации × 3 seed, ~1.5–2 ч. Всё как у `resnet_B`, меняется только то,
+что делаем с фоном во время обучения:
+
+- `resnet_gray` — с вероятностью 0.5 фон заменяется серым (просто убрать фон);
+- `resnet_blur` — с вероятностью 0.5 собственный фон размывается (животное остаётся чётким);
+- `resnet_cutmix` — фон не трогаем, обычная аугментация CutMix (p = 0.5 на батч): помогает ли
+  общая аугментация так же, как целевая?
+
+Учти при анализе: `resnet_gray` видит при обучении ровно тот же серый фон, что и тестовое условие fg-only.
+{RESUME_NOTE}
 '''),
-    code('''
-histories = {}
-for name, cfg in configs.items():
-    for seed in SEEDS:
-        run_dir = RUNS / f"{name}_seed{seed}"
-        print(f"=== {run_dir.name} ===")
-        histories[(name, seed)] = pd.DataFrame(train(cfg, seed, data, run_dir))
+    *train_cells(["resnet_gray", "resnet_blur", "resnet_cutmix"]),
+])
+
+arch_nb = nb([
+    md(f'''
+# 03c · Train ConvNeXt-Tiny and Swin-T (A and B)
+{colab_badge("03c_train_convnext_swin.ipynb")}
+
+**Runtime → T4 GPU → Run all.** 4 конфигурации × 3 seed, ~3–4 ч (можно в несколько заходов).
+Тот же протокол, что у ResNet-18 (ImageNet-веса, 15 эпох, AdamW, тот же lr); A и B отличаются только `p_swap`.
+Вопрос: зависит ли смещение на фон от архитектуры — современная CNN (ConvNeXt) vs трансформер (Swin)?
+{RESUME_NOTE}
 '''),
-    code('''
-rows = []
-for (name, seed), h in histories.items():
-    best = h.loc[h.val_acc_original.idxmax()]
-    rows.append({"model": name, "seed": seed, "best_epoch": int(best.epoch),
-                 "val_original": best.val_acc_original, "val_swapped": best.val_acc_swapped,
-                 "gap": best.val_acc_original - best.val_acc_swapped})
-best = pd.DataFrame(rows)
-print(best.groupby("model")[["val_original", "val_swapped", "gap"]].agg(["mean", "std"]).round(4))
-best.round(4)
+    *train_cells(["convnext_A", "convnext_B", "swin_A", "swin_B"]),
+])
+
+depth_nb = nb([
+    md(f'''
+# 03d · Train ResNet-50 and ResNet-18 from scratch (A and B)
+{colab_badge("03d_train_resnet50_scratch.ipynb")}
+
+**Runtime → T4 GPU → Run all.** 4 конфигурации × 3 seed, ~3.5–4.5 ч (можно в несколько заходов).
+
+- `resnet50_A/B` — та же семья, модель больше: влияет ли размер?
+- `scratch_A/B` — ResNet-18 без ImageNet-предобучения (40 эпох, lr 1e-3 для всех слоёв). Точность будет
+  заметно ниже (~30–50%); смотрим не на неё, а на то, сильнее ли такая модель опирается на фон.
+{RESUME_NOTE}
 '''),
-    code('''
-from bgbias.github_sync import sync
-sync(REPO_DIR, "Training histories: " + ", ".join(CONFIGS))
-'''),
+    *train_cells(["resnet50_A", "resnet50_B", "scratch_A", "scratch_B"]),
 ])
 
 eval_nb = nb([
@@ -483,7 +545,7 @@ eval_nb = nb([
 # 04 · Evaluate all models
 {colab_badge("04_evaluate.ipynb")}
 
-Оценивает каждый `runs/resnet_*_seed*/best.pt` и `runs/hog_svm/model.joblib` в условиях
+Оценивает каждый `runs/*_seed*/best.pt` и `runs/hog_svm/model.joblib` в условиях
 original / swapped / fgonly / bgonly и собирает главную таблицу (mean ± std по seed).
 Уже посчитанные предсказания берутся из `MyDrive/bgbias/results/<split>/`, новые модели (ablation) досчитываются.
 В конце результаты автоматически пушатся в GitHub.
@@ -511,7 +573,7 @@ summaries = {}
 
 CACHE = DRIVE_ROOT / "results" / SPLIT   # predictions already computed in an earlier run are reused
 
-for run in sorted(p.parent for p in RUNS.glob("resnet_*/best.pt")):
+for run in sorted(p.parent for p in RUNS.glob("*_seed*/best.pt")):
     cached = CACHE / f"{run.name}_predictions.csv"
     if cached.exists():
         table = pd.read_csv(cached)
@@ -564,6 +626,9 @@ sync(REPO_DIR, f"Evaluation results ({SPLIT})")
 
 (OUT / "02_hog_svm.ipynb").write_text(json.dumps(hog_nb, indent=1, ensure_ascii=False))
 (OUT / "03_train_resnet.ipynb").write_text(json.dumps(train_nb, indent=1, ensure_ascii=False))
+(OUT / "03b_train_methods.ipynb").write_text(json.dumps(methods_nb, indent=1, ensure_ascii=False))
+(OUT / "03c_train_convnext_swin.ipynb").write_text(json.dumps(arch_nb, indent=1, ensure_ascii=False))
+(OUT / "03d_train_resnet50_scratch.ipynb").write_text(json.dumps(depth_nb, indent=1, ensure_ascii=False))
 (OUT / "04_evaluate.ipynb").write_text(json.dumps(eval_nb, indent=1, ensure_ascii=False))
 print("ok 02-04")
 
@@ -584,6 +649,8 @@ analysis_nb = nb([
 4. Какие породы сильнее зависят от фона; кошки vs собаки
 5. Примеры: A ошибается после замены фона, B — нет; Grad-CAM
 6. Grad-CAM в цифрах: доля внимания на животном
+7. Архитектуры: ResNet-18 / scratch / ResNet-50 / ConvNeXt-T / Swin-T, A vs B
+8. Методы: CutMix, размытый фон, серый фон, замена фона
 '''),
     SETUP,
     code('''
@@ -781,6 +848,89 @@ for model_name in ("resnet_A", "resnet_B"):
 cam_stats = pd.DataFrame(rows)
 cam_stats.to_csv(TAB_DIR / "gradcam_foreground_share.csv", index=False)
 cam_stats.groupby(["model", "condition"])[["cam_on_pet", "pet_area"]].agg(["mean", "std"]).round(3)
+'''),
+    md('''
+## 7. Архитектуры: A vs B для каждой
+
+Для каждой архитектуры: модель без замены фона (A) и с заменой p = 0.5 (B), по 3 seed.
+Показываются только уже обученные и оценённые модели (`03c`, `03d` → `04_evaluate`).
+'''),
+    code('''
+def model_stats(model):
+    runs = per_run[per_run.model == model]
+    out = {"n_seeds": len(runs)}
+    for m in ("acc_original", "acc_swapped", "acc_fgonly", "acc_bgonly", "gap_swap", "flip_swap"):
+        out[m] = runs[m].mean()
+        out[m + "_std"] = runs[m].std()
+    return out
+
+fam_rows = []
+for fam, (ma, mb) in A.FAMILIES.items():
+    if not (per_run.model == ma).any() or not (per_run.model == mb).any():
+        print("skip", fam, "(not evaluated yet)")
+        continue
+    boot = A.bootstrap_gap_difference(tables, ma, mb, n_boot=2000)
+    for variant, m in (("A", ma), ("B", mb)):
+        fam_rows.append({"family": fam, "variant": variant, "model": m, **model_stats(m)})
+    fam_rows[-1].update({"gapA_minus_gapB": boot["difference"], "ci_low": boot["ci_low"], "ci_high": boot["ci_high"]})
+families = pd.DataFrame(fam_rows)
+families.to_csv(TAB_DIR / "architectures.csv", index=False)
+
+fams = list(dict.fromkeys(families.family))
+fig, axes = plt.subplots(1, 2, figsize=(11, 0.6 * len(fams) + 1.6), sharey=True)
+y = np.arange(len(fams))
+for ax, metric, title in ((axes[0], "acc_original", "Accuracy on original images"),
+                          (axes[1], "gap_swap", "Robustness gap: original − swapped")):
+    for variant, model_key, dy in (("A", "resnet_A", -0.12), ("B", "resnet_B", 0.12)):
+        d = families[families.variant == variant].set_index("family").loc[fams]
+        ax.errorbar(d[metric], y + dy, xerr=d[metric + "_std"], fmt="o", ms=7, color=COLORS[model_key],
+                    capsize=3, label=f"{variant}: {'background swap p = 0.5' if variant == 'B' else 'original images'}")
+    ax.set_title(title)
+    ax.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=0 if metric == "acc_original" else 1))
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", visible=True, color="#ebeae6")
+axes[1].axvline(0, color=INK2, lw=0.8)
+axes[0].set_yticks(y, fams)
+axes[0].invert_yaxis()
+axes[1].legend(loc="lower right")
+fig.tight_layout()
+save(fig, "fig5_architectures")
+families.drop(columns=[c for c in families.columns if c.endswith("_std")]).round(4)
+'''),
+    md('''
+## 8. Методы против смещения на фон (ResNet-18)
+
+Все модели — ResNet-18 с ImageNet-весами и одинаковым протоколом; отличается только обработка фона при обучении.
+CutMix — общая аугментация, ничего не знает о фоне. `Gray background` видит при обучении тот же серый фон,
+что и тестовое условие fg-only, поэтому его fg-only точность не сравнима с остальными.
+'''),
+    code('''
+meth = pd.DataFrame([{"method": label, "model": m, **model_stats(m)}
+                     for label, m in A.METHODS.items() if (per_run.model == m).any()])
+meth.to_csv(TAB_DIR / "methods.csv", index=False)
+for label, m in A.METHODS.items():
+    if m != "resnet_A" and (per_run.model == m).any():
+        b = A.bootstrap_gap_difference(tables, "resnet_A", m, n_boot=2000)
+        print(f"{label:20s} gap A - gap method = {b['difference']:.2%}  95% CI [{b['ci_low']:.2%}, {b['ci_high']:.2%}]")
+
+fig, axes = plt.subplots(1, 2, figsize=(11, 0.55 * len(meth) + 1.6), sharey=True)
+y = np.arange(len(meth))
+for ax, metric, title in ((axes[0], "acc_original", "Accuracy on original images"),
+                          (axes[1], "gap_swap", "Robustness gap: original − swapped")):
+    ax.errorbar(meth[metric], y, xerr=meth[metric + "_std"], fmt="o", ms=8, color=INK2, capsize=3)
+    for yi, v in zip(y, meth[metric]):
+        ax.annotate(f"{v:.1%}", (v, yi), xytext=(0, 9), textcoords="offset points", ha="center",
+                    fontsize=8, color=INK2)
+    ax.set_title(title)
+    ax.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=1))
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", visible=True, color="#ebeae6")
+axes[1].axvline(0, color=INK2, lw=0.8)
+axes[0].set_yticks(y, meth.method)
+axes[0].invert_yaxis()
+fig.tight_layout()
+save(fig, "fig6_methods")
+meth.drop(columns=[c for c in meth.columns if c.endswith("_std")]).round(4)
 '''),
     md("## Сохранение и push"),
     code('''

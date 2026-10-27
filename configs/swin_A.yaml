@@ -1,0 +1,12 @@
+# Architecture swin_t, original images. Must match swin_B.yaml except name and p_swap.
+name: swin_A
+arch: swin_t
+p_swap: 0.0
+epochs: 15
+batch_size: 64
+lr_backbone: 1.0e-4
+lr_head: 1.0e-3
+weight_decay: 1.0e-4
+img_size: 224
+include_border: true
+blur_sigma: 1.5

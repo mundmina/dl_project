@@ -1,0 +1,12 @@
+# Architecture swin_t, background swap p = 0.5. Must match swin_A.yaml except name and p_swap.
+name: swin_B
+arch: swin_t
+p_swap: 0.5
+epochs: 15
+batch_size: 64
+lr_backbone: 1.0e-4
+lr_head: 1.0e-3
+weight_decay: 1.0e-4
+img_size: 224
+include_border: true
+blur_sigma: 1.5

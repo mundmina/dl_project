@@ -1,0 +1,13 @@
+# ResNet-18 trained from scratch (no ImageNet), original images. Longer schedule, one lr for all layers. Must match scratch_B.yaml except name and p_swap.
+name: scratch_A
+arch: resnet18
+pretrained: false
+p_swap: 0.0
+epochs: 40
+batch_size: 64
+lr_backbone: 1.0e-3
+lr_head: 1.0e-3
+weight_decay: 5.0e-2
+img_size: 224
+include_border: true
+blur_sigma: 1.5

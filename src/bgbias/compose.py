@@ -60,6 +60,11 @@ def foreground_only(img, alpha, color=NEUTRAL_RGB):
     return composite(img, alpha, solid(img.size, color))
 
 
+def blur_background(img, alpha, radius=12):
+    """Pet kept sharp, its own background Gaussian-blurred."""
+    return composite(img, alpha, img.filter(ImageFilter.GaussianBlur(radius)))
+
+
 def background_only(img, alpha, color=NEUTRAL_RGB):
     """Pet painted over with the neutral colour: can the model guess the breed from context alone?"""
     return composite(solid(img.size, color), alpha, img)

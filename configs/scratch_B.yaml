@@ -1,0 +1,13 @@
+# ResNet-18 trained from scratch, background swap p = 0.5. Must match scratch_A.yaml except name and p_swap.
+name: scratch_B
+arch: resnet18
+pretrained: false
+p_swap: 0.5
+epochs: 40
+batch_size: 64
+lr_backbone: 1.0e-3
+lr_head: 1.0e-3
+weight_decay: 5.0e-2
+img_size: 224
+include_border: true
+blur_sigma: 1.5

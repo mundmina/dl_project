@@ -1,4 +1,6 @@
-"""ResNet-18 training. A and B share everything except `p_swap` in the config.
+"""Training. Within one architecture, A and B share everything except `p_swap` in the config.
+Optional config keys: arch (default resnet18), pretrained (default true), bg_mode (default places),
+cutmix (probability of applying CutMix to a batch, default 0).
 
 Checkpoints go to `run_dir` (on Drive) every epoch; re-running `train` with the same
 run_dir resumes from `last.pt`. The loader generator is reseeded every epoch from
@@ -13,8 +15,9 @@ import torch
 import torch.nn as nn
 import yaml
 from torch.utils.data import DataLoader
+from torchvision.transforms import v2
 
-from .models import build_resnet18, param_groups
+from .models import build_model, param_groups
 from .project import make_dataset
 from .utils import seed_everything
 
@@ -56,16 +59,20 @@ def train(cfg, seed, data, run_dir, device=None):
 
     common = dict(include_border=cfg["include_border"], blur_sigma=cfg["blur_sigma"], img_size=cfg["img_size"])
     workers = cfg.get("num_workers", os.cpu_count())
-    train_loader = make_loader(make_dataset(data, "train", train=True, p_swap=cfg["p_swap"], **common),
+    train_loader = make_loader(make_dataset(data, "train", train=True, p_swap=cfg["p_swap"],
+                                            bg_mode=cfg.get("bg_mode", "places"), **common),
                                cfg["batch_size"], True, seed, workers)
     # val swapped is for monitoring only; checkpoints are selected on val original.
     val_loaders = {c: make_loader(make_dataset(data, "val", condition=c, **common),
                                   2 * cfg["batch_size"], False, seed, workers)
                    for c in ("original", "swapped")}
 
-    model = build_resnet18(data.num_classes).to(device)
-    optimizer = torch.optim.AdamW(param_groups(model, cfg["lr_backbone"], cfg["lr_head"]),
+    arch = cfg.get("arch", "resnet18")
+    model = build_model(arch, data.num_classes, pretrained=cfg.get("pretrained", True)).to(device)
+    optimizer = torch.optim.AdamW(param_groups(model, cfg["lr_backbone"], cfg["lr_head"], arch),
                                   weight_decay=cfg["weight_decay"])
+    p_cutmix = cfg.get("cutmix", 0.0)
+    cutmix = v2.CutMix(num_classes=data.num_classes)
     scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=cfg["epochs"] * len(train_loader))
     scaler = torch.amp.GradScaler(device.type, enabled=device.type == "cuda")
     loss_fn = nn.CrossEntropyLoss()
@@ -89,9 +96,12 @@ def train(cfg, seed, data, run_dir, device=None):
         loss_sum = correct = total = 0
         for x, y in train_loader:
             x, y = x.to(device, non_blocking=True), y.to(device, non_blocking=True)
+            target = y
+            if p_cutmix > 0 and torch.rand(1).item() < p_cutmix:
+                x, target = cutmix(x, y)   # soft labels; train_acc below still counts the hard label
             with torch.autocast(device.type, enabled=device.type == "cuda"):
                 out = model(x)
-                loss = loss_fn(out, y)
+                loss = loss_fn(out.float(), target)
             optimizer.zero_grad(set_to_none=True)
             scaler.scale(loss).backward()
             scaler.step(optimizer)

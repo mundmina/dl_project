@@ -22,8 +22,11 @@ caches dataset archives in `MyDrive/bgbias/data/`.
 | [`01_data`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/01_data.ipynb) | Splits, mask audit, background pools, fixed val/test backgrounds, example gallery, DataLoader smoke test |
 | [`02_hog_svm`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/02_hog_svm.ipynb) | HOG + linear SVM baseline, C chosen on validation |
 | [`03_train_resnet`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/03_train_resnet.ipynb) | Train ResNet-18 A, B and the p ablation (0.25, 1.0), seeds 0–2 (resumable, checkpoints on Drive) |
+| [`03b_train_methods`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/03b_train_methods.ipynb) | ResNet-18 with other background strategies: gray background, blurred background, CutMix |
+| [`03c_train_convnext_swin`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/03c_train_convnext_swin.ipynb) | ConvNeXt-Tiny and Swin-T, A and B |
+| [`03d_train_resnet50_scratch`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/03d_train_resnet50_scratch.ipynb) | ResNet-50 and ResNet-18 from scratch, A and B |
 | [`04_evaluate`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/04_evaluate.ipynb) | All models × all conditions → predictions, metrics, main table (test) |
-| [`05_analysis`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/05_analysis.ipynb) | Report figures, bootstrap CI, per-breed gaps, flip examples, Grad-CAM (illustration + foreground share) |
+| [`05_analysis`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/05_analysis.ipynb) | Report figures, bootstrap CI, per-breed gaps, flip examples, Grad-CAM, architecture and method comparison |
 
 Notebooks 03–05 push their small outputs (histories, predictions, tables, figures) to this repo at the end;
 this needs a Colab secret `GITHUB_TOKEN` (fine-grained, Contents read/write on this repo).
