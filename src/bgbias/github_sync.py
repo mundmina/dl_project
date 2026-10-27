@@ -45,6 +45,10 @@ def push(repo_dir, message, paths=RESULT_PATHS, branch="main"):
     except Exception as e:  # noqa: BLE001 - missing secret, access not granted, not in Colab
         print(f"skip push to GitHub ({type(e).__name__}): add the GITHUB_TOKEN secret in Colab")
         return
+    token = token.strip()
+    if token.count("github_pat_") > 1:
+        print("skip push to GitHub: GITHUB_TOKEN contains several tokens pasted together, keep only one")
+        return
 
     def git(*args, check=True):
         r = subprocess.run(["git", "-C", str(repo_dir), "-c", f"user.name={GIT_NAME}",
@@ -52,8 +56,9 @@ def push(repo_dir, message, paths=RESULT_PATHS, branch="main"):
         out = (r.stdout + r.stderr).replace(token, "***").strip()
         if out:
             print(out)
-        if check:
-            r.check_returncode()
+        if check and r.returncode:
+            # not check_returncode(): its traceback would print the command with the token in the URL
+            raise RuntimeError(f"git {args[0]} failed (exit {r.returncode}), see output above")
         return r
 
     url = f"https://{GIT_NAME}:{token}@{REMOTE}"
