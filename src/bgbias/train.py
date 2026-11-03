@@ -11,6 +11,8 @@ double backward through fp16 input gradients underflows.
 Checkpoints go to `run_dir` (on Drive) every epoch; re-running `train` with the same
 run_dir resumes from `last.pt`. The loader generator is reseeded every epoch from
 (seed, epoch), so shuffling and augmentation do not depend on where a run was resumed.
+A finished run (history.json holds every epoch) is skipped, and its `last.pt` (weights plus
+AdamW state, about 3x the size of `best.pt`) is deleted: only `best.pt` is evaluated later.
 """
 import json
 import os
@@ -65,10 +67,33 @@ def background_share(model_out, x, mask):
     return (energy * (1 - mask)).flatten(1).sum(1) / energy.flatten(1).sum(1).clamp_min(1e-12)
 
 
+def run_finished(run_dir, epochs):
+    """True when best.pt exists and history.json already holds `epochs` rows."""
+    run_dir = Path(run_dir)
+    history = run_dir / "history.json"
+    return (run_dir / "best.pt").exists() and history.exists() and len(json.loads(history.read_text())) >= epochs
+
+
+def prune_last_checkpoints(runs_dir):
+    """Delete last.pt of every finished run under runs_dir (needs config.yaml next to it). Returns bytes freed."""
+    freed = 0
+    for last in sorted(Path(runs_dir).glob("*/last.pt")):
+        cfg_path = last.parent / "config.yaml"
+        if cfg_path.exists() and run_finished(last.parent, yaml.safe_load(cfg_path.read_text())["epochs"]):
+            freed += last.stat().st_size
+            last.unlink()
+            print(f"removed {last.parent.name}/last.pt")
+    return freed
+
+
 def train(cfg, seed, data, run_dir, device=None):
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
+    if run_finished(run_dir, cfg["epochs"]):
+        print(f"{run_dir.name}: already trained for {cfg['epochs']} epochs, skipping")
+        (run_dir / "last.pt").unlink(missing_ok=True)
+        return json.loads((run_dir / "history.json").read_text())
     seed_everything(seed)
 
     common = dict(include_border=cfg["include_border"], blur_sigma=cfg["blur_sigma"], img_size=cfg["img_size"])
@@ -156,4 +181,5 @@ def train(cfg, seed, data, run_dir, device=None):
                "scheduler": scheduler.state_dict(), "scaler": scaler.state_dict(),
                "epoch": epoch, "best_acc": best_acc, "history": history}, last_path)
         (run_dir / "history.json").write_text(json.dumps(history, indent=1))
+    last_path.unlink(missing_ok=True)   # finished: resume state is no longer needed, best.pt stays
     return history

@@ -17,6 +17,7 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+import yaml
 from PIL import Image, ImageFilter
 from torch.utils.data import DataLoader, Dataset
 
@@ -24,6 +25,7 @@ from . import compose
 from .data_setup import _fetch
 from .datasets import build_transform
 from .models import build_model, param_groups
+from .train import run_finished
 from .utils import DRIVE_ROOT, LOCAL_DATA, seed_everything
 
 WB_URL = "https://nlp.stanford.edu/data/dro/"
@@ -162,6 +164,11 @@ def train(cfg, seed, df, root, masks, places_root, bg_pool, run_dir, device):
 
     start, best, history = 0, -1.0, []
     last_path, best_path = run_dir / "last.pt", run_dir / "best.pt"
+    if run_finished(run_dir, cfg["epochs"]):
+        print(f"{run_dir.name}: already trained for {cfg['epochs']} epochs, skipping")
+        last_path.unlink(missing_ok=True)
+        return json.loads((run_dir / "history.json").read_text())
+    (run_dir / "config.yaml").write_text(yaml.safe_dump({**cfg, "seed": seed}))
     if last_path.exists():
         ckpt = torch.load(last_path, map_location=device, weights_only=False)
         model.load_state_dict(ckpt["model"])
@@ -195,4 +202,5 @@ def train(cfg, seed, df, root, masks, places_root, bg_pool, run_dir, device):
         torch.save({"model": model.state_dict(), "optimizer": optimizer.state_dict(), "scheduler": scheduler.state_dict(),
                     "scaler": scaler.state_dict(), "epoch": epoch, "best_acc": best, "history": history}, last_path)
         (run_dir / "history.json").write_text(json.dumps(history, indent=1))
+    last_path.unlink(missing_ok=True)   # finished: only best.pt is needed from here on
     return history

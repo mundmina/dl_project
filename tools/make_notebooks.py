@@ -362,6 +362,9 @@ from bgbias.utils import DRIVE_ROOT
 data = load_project_data(REPO_DIR)   # splits / manifests from the repo or from MyDrive/bgbias/week1
 RUNS = DRIVE_ROOT / "runs"           # checkpoints and per-run outputs live on Drive
 RUNS.mkdir(parents=True, exist_ok=True)
+from bgbias.train import prune_last_checkpoints
+# last.pt (weights + optimizer state) is only needed to resume; finished runs keep best.pt only
+print(f"Drive space freed: {prune_last_checkpoints(RUNS) / 1e9:.2f} GB")
 {name: len(df) for name, df in data.splits.items()}
 ''')
 
@@ -503,7 +506,8 @@ train_nb = nb([
 Конфиг зафиксирован после пробного запуска A/seed 0 (val original 92.75%, плато с ~3-й эпохи, 15 эпох достаточно).
 Менять `epochs` / `lr` можно только в **обоих** `configs/resnet_A.yaml` и `configs/resnet_B.yaml` одновременно.
 
-Checkpoints: `MyDrive/bgbias/runs/<name>_seed<k>/` (`best.pt` по val original, `last.pt` для продолжения).
+Checkpoints: `MyDrive/bgbias/runs/<name>_seed<k>/` (`best.pt` по val original, `last.pt` для продолжения; после
+окончания прогона `last.pt` удаляется, остаётся только `best.pt`).
 Если Colab отключился — просто запусти ноутбук снова, обучение продолжится с последней эпохи.
 '''),
     *train_cells(["resnet_A", "resnet_B", "resnet_p025", "resnet_p100"]),
