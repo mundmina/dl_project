@@ -1273,6 +1273,23 @@ subprocess.run([sys.executable, "-m", "pip", "install", "-q", "gradio"], check=T
 """),
     PROJECT,
     code("""
+# Checkpoints from the teammate's archive (MyDrive/dl/runs.zip, a shortcut to the shared folder):
+# copy only the two best.pt the demo needs into runs/, the 12.5 GB archive stays where it is.
+import shutil, zipfile
+ARCHIVE = Path("/content/drive/MyDrive/dl/runs.zip")
+for m in ("resnet_A", "resnet_B"):
+    dst = RUNS / f"{m}_seed0" / "best.pt"
+    if dst.exists():
+        continue
+    assert ARCHIVE.exists(), f"no {dst} and no {ARCHIVE}: add the shared dl folder to My Drive"
+    with zipfile.ZipFile(ARCHIVE) as z:
+        member = next(n for n in z.namelist() if n.endswith(f"{m}_seed0/best.pt"))
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        with z.open(member) as src, open(dst, "wb") as out:
+            shutil.copyfileobj(src, out)
+    print("copied", member, "->", dst)
+"""),
+    code("""
 import numpy as np
 import pandas as pd
 from PIL import Image, ImageFilter
