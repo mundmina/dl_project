@@ -1,0 +1,13 @@
+arch: resnet18
+batch_size: 64
+blur_sigma: 1.5
+epochs: 40
+img_size: 224
+include_border: true
+lr_backbone: 0.001
+lr_head: 0.001
+name: scratch_A
+p_swap: 0.0
+pretrained: false
+seed: 2
+weight_decay: 0.05

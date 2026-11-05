@@ -97,7 +97,7 @@ def train(cfg, seed, data, run_dir, device=None):
     seed_everything(seed)
 
     common = dict(include_border=cfg["include_border"], blur_sigma=cfg["blur_sigma"], img_size=cfg["img_size"])
-    workers = cfg.get("num_workers", os.cpu_count())
+    workers = int(os.environ.get("BGBIAS_WORKERS", cfg.get("num_workers", os.cpu_count())))
     rrr = cfg.get("rrr_lambda", 0.0)
     assert not (rrr > 0 and cfg.get("cutmix", 0.0) > 0), "saliency penalty and CutMix are not combined"
     use_amp = device.type == "cuda" and rrr == 0
