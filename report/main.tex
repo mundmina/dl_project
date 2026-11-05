@@ -13,6 +13,7 @@
 \usepackage{booktabs}
 \usepackage{longtable}
 \usepackage{tabularx}
+\usepackage{adjustbox}
 \usepackage{array}
 \usepackage{multirow}
 \usepackage{xcolor}
@@ -24,13 +25,14 @@
 \graphicspath{{figures/}}
 \captionsetup{font=small,labelfont=bf}
 \setlist{itemsep=2pt,topsep=4pt}
-\newcommand{\pp}{\,p.p.}
+\makeatletter\DeclareRobustCommand{\pp}{\,p.p\@ifnextchar.{}{.\@}}\makeatother
 \newcommand{\acc}{\mathrm{Acc}}
 \newcommand{\gap}{\mathrm{Gap}}
 \newcommand{\flip}{\mathrm{Flip}}
 \newcommand{\E}{\mathbb{E}}
-\newcommand{\1}{\mathbb{1}}
+\newcommand{\1}{\mathbf{1}}
 \input{tables/numbers}
+\makeatletter\let\tableinput\@@input\makeatother
 
 \title{\textbf{Background Bias in Image Classification:}\\
 Does a Breed Classifier Look at the Animal or at the Background?}
@@ -170,6 +172,7 @@ contains all 37 classes. The CSV files are committed to the repository and used 
 
 \begin{table}[h]
 \centering\small
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lrrrrr}
 \toprule
 Split & Images & Cats & Dogs & Min / max images per breed \\
@@ -179,6 +182,7 @@ Validation & 552 & 178 & 374 & 14 / 15 \\
 Test (official) & 3{,}669 & 1{,}183 & 2{,}486 & 88 / 100 \\
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Pet splits. Classes are balanced, so chance accuracy is $1/37 = 2.7\%$.}
 \label{tab:splits}
 \end{table}
@@ -196,6 +200,7 @@ hunting, fishpond, field/wild, rodeo, racecourse}), so that a pasted pet rarely 
 
 \begin{table}[h]
 \centering\small
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lrrl}
 \toprule
 Pool & Categories & Images & Used for \\
@@ -205,6 +210,7 @@ Pool & Categories & Images & Used for \\
 \texttt{bg\_test} & 87 & 8{,}700 & swapped test set; probing labels \\
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Background pools. Pools share no image and no scene category, so test backgrounds are
 \emph{new types of scene}, not just new photos of known scenes.}
 \label{tab:pools}
@@ -344,6 +350,7 @@ $R$ is chosen; the box of $x_i$ is
 
 \subsection{Architectures}
 \begin{center}\small
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{llrl}
 \toprule
 Model & Type & Params & Initialisation (torchvision) \\
@@ -355,6 +362,7 @@ ConvNeXt-T \cite{liu2022convnext} & modern CNN (large kernels, LayerNorm) & 28.6
 Swin-T \cite{liu2021swin} & vision transformer, shifted windows & 28.3\,M & \texttt{IMAGENET1K\_V1} \\
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \end{center}
 In every model the ImageNet classifier is replaced by a new linear layer with 37 outputs; the rest of the network
 (the \emph{backbone}) is fine-tuned. The scratch model shows what happens without ImageNet knowledge: it has to learn
@@ -363,7 +371,7 @@ everything from 3{,}128 images.
 \subsection{Training protocol}
 \begin{table}[h]
 \centering\small
-\begin{tabular}{ll}
+\begin{tabularx}{\textwidth}{@{}lX@{}}
 \toprule
 Setting & Value \\
 \midrule
@@ -380,7 +388,7 @@ Seeds & 0, 1, 2 (Python, NumPy, PyTorch, CUDA; DataLoader generator reseeded eve
 Scratch ResNet-18 & 40 epochs, one learning rate $10^{-3}$ for all layers, weight decay $5\cdot10^{-2}$ \\
 Waterbirds & ResNet-18, 2 classes, 10 epochs, otherwise as above; checkpoint by validation \emph{average} accuracy \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \caption{Training settings. They were fixed on the validation set for ResNet-18 A and then reused unchanged for every
 configuration; nothing was tuned on the test set.}
 \label{tab:hparams}
@@ -442,7 +450,7 @@ where $P_k$ and $R_k$ are precision and recall of class $k$. Classes are balance
 \begin{equation}
   \gap_{\text{swap}} = \acc_{\text{orig}}-\acc_{\text{swap}},\qquad \gap_{\text{fg}} = \acc_{\text{orig}}-\acc_{\text{fg}}.
 \end{equation}
-It is reported in percentage points (\pp). A gap must be read together with the accuracy: a weak model can have a small
+It is reported in percentage points (p.p.). A gap must be read together with the accuracy: a weak model can have a small
 gap simply because it is wrong everywhere.
 
 \paragraph{Flip rate.} The share of images whose prediction changes when only the background changes:
@@ -462,8 +470,8 @@ $\gap(A)-\gap(B)$ due to the finite test set. For every test image $i$, average 
   d_i^{M} = \frac13\sum_{s}\Big(\1[\hat y^{M,s}(x_i^{(\text{orig})})=y_i]-\1[\hat y^{M,s}(x_i^{(\text{swap})})=y_i]\Big),
   \qquad \Delta_i = d_i^{A}-d_i^{B},
 \end{equation}
-so that $\bar\Delta=\frac1N\sum_i\Delta_i=\gap(A)-\gap(B)$. We draw $B=2{,}000$ bootstrap samples of $N$ indices with
-replacement, compute $\bar\Delta^{*b}$ for each, and report the 2.5th and 97.5th percentiles as a 95\% confidence
+so that $\bar\Delta=\frac1N\sum_i\Delta_i=\gap(A)-\gap(B)$. We draw $n_{\text{boot}}=2{,}000$ bootstrap samples of $N$ indices with
+replacement, compute the mean $\bar\Delta^{*}$ of each resample, and report the 2.5th and 97.5th percentiles as a 95\% confidence
 interval \cite{efron1993bootstrap}. The bootstrap is \emph{paired}: A and B are resampled on the same images, so
 image difficulty cancels out. The same procedure gives confidence intervals for accuracy differences on Stanford Dogs.
 
@@ -513,15 +521,17 @@ number that exposes it. Group labels are used only for evaluation, never for tra
 \begin{table}[h]
 \centering\small
 \setlength{\tabcolsep}{4pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lcccccccc}
 \toprule
- & & \multicolumn{4}{c}{Test accuracy (\%)} & \multicolumn{2}{c}{Gap (\pp)} & Flip \\
+ & & \multicolumn{4}{c}{Test accuracy (\%)} & \multicolumn{2}{c}{Gap (p.p.)} & Flip \\
 \cmidrule(lr){3-6}\cmidrule(lr){7-8}
 Model & Seeds & Original & Swapped & Fg-only & Bg-only & swap & fg & swap (\%) \\
 \midrule
-\input{tables/main_all}
+\tableinput tables/main_all.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{All configurations on the Pet test set (mean $\pm$ std over 3 seeds; HOG is deterministic).
 Chance accuracy is 2.7\%. Gap = original $-$ condition; flip = share of predictions that change.}
 \label{tab:main}
@@ -562,13 +572,15 @@ meaningless at this accuracy.
 \subsection{How much swapping is needed? Ablation over $p$}
 \begin{table}[h]
 \centering\small
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{cccccc}
 \toprule
-$p$ & Original (\%) & Swapped (\%) & Fg-only (\%) & Gap swap (\pp) & Flip (\%) \\
+$p$ & Original (\%) & Swapped (\%) & Fg-only (\%) & Gap swap (p.p.) & Flip (\%) \\
 \midrule
-\input{tables/ablation}
+\tableinput tables/ablation.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{ResNet-18 with swap probability $p$ (3 seeds each); $p=0$ is A, $p=0.5$ is B.}
 \label{tab:ablation}
 \end{table}
@@ -588,13 +600,15 @@ $p=0.5$ is the best compromise: highest original accuracy and lowest flip rate.
 \begin{table}[h]
 \centering\small
 \setlength{\tabcolsep}{4pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{llcccccc}
 \toprule
-Architecture & & Original (\%) & Swapped (\%) & Gap (\pp) & Flip (\%) & Bg-only (\%) & Gap A$-$B [95\% CI] \\
+Architecture & & Original (\%) & Swapped (\%) & Gap (p.p.) & Flip (\%) & Bg-only (\%) & Gap A$-$B [95\% CI] \\
 \midrule
-\input{tables/architectures}
+\tableinput tables/architectures.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Five architectures, A ($p=0$) vs B ($p=0.5$), 3 seeds each. The last column is the paired-bootstrap
 difference of gaps.}
 \label{tab:arch}
@@ -625,13 +639,15 @@ Background swapping lowers the gap for every architecture, and every bootstrap i
 \subsection{Comparison of strategies for handling the background}
 \begin{table}[h]
 \centering\small
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lccccc}
 \toprule
-Method (ResNet-18) & Original (\%) & Swapped (\%) & Fg-only (\%) & Gap (\pp) & Flip (\%) \\
+Method (ResNet-18) & Original (\%) & Swapped (\%) & Fg-only (\%) & Gap (p.p.) & Flip (\%) \\
 \midrule
-\input{tables/methods}
+\tableinput tables/methods.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Six ways to train ResNet-18 with respect to the background, 3 seeds each.}
 \label{tab:methods}
 \end{table}
@@ -658,13 +674,15 @@ Only the random scene swap removes the gap (Table~\ref{tab:methods}, Fig.~\ref{f
 \subsection{Which breeds depend on the background?}
 \begin{table}[h]
 \centering\small
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{llrr}
 \toprule
-Breed & Species & Gap A (\pp) & Gap B (\pp) \\
+Breed & Species & Gap A (p.p.) & Gap B (p.p.) \\
 \midrule
-\input{tables/per_breed}
+\tableinput tables/per_breed.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{The 12 breeds with the largest $|\text{gap}|$ for ResNet-18 A (average over seeds; 88--100 test images per
 breed, so one image $\approx1$\pp). Negative = more accurate on swapped images.}
 \label{tab:breeds}
@@ -684,13 +702,15 @@ $+0.7$ and $-5.7$\pp. On average cats have a larger gap than dogs for A (\catGap
 \subsection{Where do the models look? Grad-CAM}
 \begin{table}[h]
 \centering\small
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lcc}
 \toprule
 Model & CAM-on-pet, original & CAM-on-pet, swapped \\
 \midrule
-\input{tables/gradcam}
+\tableinput tables/gradcam.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Share of Grad-CAM mass on the pet (500 test images $\times$ 3 seeds). Pet area $\approx$ \gradcamArea.}
 \label{tab:gradcam}
 \end{table}
@@ -712,23 +732,27 @@ Figure~\ref{fig:gradcam} shows such flips.
 \begin{table}[h]
 \centering\small
 \begin{subtable}{0.58\textwidth}\centering
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lccc}
 \toprule
 Architecture & Before fine-tuning & A & B \\
 \midrule
-\input{tables/probing_arch}
+\tableinput tables/probing_arch.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Architectures}
 \end{subtable}\hfill
 \begin{subtable}{0.4\textwidth}\centering
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lc}
 \toprule
 ResNet-18 variant & Scene acc. (\%) \\
 \midrule
-\input{tables/probing_methods}
+\tableinput tables/probing_methods.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Training strategies}
 \end{subtable}
 \caption{Linear-probe accuracy (\%) for the background scene category (87 classes, chance 1.1\%), on penultimate
@@ -752,13 +776,15 @@ H2: B learns features that are \emph{invariant} to the background, so a new scen
 \begin{table}[h]
 \centering\small
 \setlength{\tabcolsep}{4pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lccccc}
 \toprule
-Model & Full photo (\%) & Dog crop (\%) & Full, dogs only (\%) & Pet test (\%) & B$-$A full [95\% CI] (\pp) \\
+Model & Full photo (\%) & Dog crop (\%) & Full, dogs only (\%) & Pet test (\%) & B$-$A full [95\% CI] (p.p.) \\
 \midrule
-\input{tables/stanford_dogs}
+\tableinput tables/stanford_dogs.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{External test: 3{,}730 Stanford Dogs photos of 21 Pet breeds, 37-way prediction (``dogs only'' = argmax over
 the 21 breeds). The last column is a paired bootstrap over photos against the corresponding A model (for the
 strategies: against ResNet-18 A).}
@@ -784,13 +810,15 @@ so this view is harder rather than ``cleaner''; the A--B ordering on crops is th
 \begin{table}[h]
 \centering\small
 \setlength{\tabcolsep}{4pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lcccccc}
 \toprule
 Model (ResNet-18) & Average & Worst group & Landbird/land & Landbird/water & Waterbird/land & Waterbird/water \\
 \midrule
-\input{tables/waterbirds}
+\tableinput tables/waterbirds.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Waterbirds test accuracy (\%), mean $\pm$ std over 3 seeds. The worst group is waterbird on land for every
 run.}
 \label{tab:wb}
@@ -934,13 +962,15 @@ evaluation metrics, error analysis. Assylkhan Tleubayev: training pipeline, mode
 
 \begin{table}[h]
 \centering\small
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lcccc}
 \toprule
 Model & Original & Swapped & Fg-only & Bg-only \\
 \midrule
-\input{tables/f1_all}
+\tableinput tables/f1_all.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Macro F1 (\%) on the Pet test set, mean $\pm$ std over seeds.}
 \label{tab:f1}
 \end{table}
@@ -948,13 +978,15 @@ Model & Original & Swapped & Fg-only & Bg-only \\
 \begin{table}[h]
 \centering\small
 \setlength{\tabcolsep}{4pt}
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lcccccc}
 \toprule
 Model & Epochs & Best epoch per seed & Val. original (\%) & Val. swapped (\%) & Final train acc. (\%) & Min / run \\
 \midrule
-\input{tables/training}
+\tableinput tables/training.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Training summary. ``Best epoch'' is the selected checkpoint (1-based) for seeds 0, 1, 2; validation accuracies
 are those of the selected checkpoint. Train accuracy of CutMix is measured on mixed images against the hard label and is
 therefore lower.}
@@ -963,13 +995,15 @@ therefore lower.}
 
 \begin{table}[h]
 \centering\small
+\begin{adjustbox}{max width=\linewidth}
 \begin{tabular}{lcrrrrrr}
 \toprule
 Model & Seed & Average & Worst group & L/land & L/water & W/land & W/water \\
 \midrule
-\input{tables/waterbirds_per_seed}
+\tableinput tables/waterbirds_per_seed.tex 
 \bottomrule
 \end{tabular}
+\end{adjustbox}
 \caption{Waterbirds test accuracy (\%) per seed (L = landbird, W = waterbird).}
 \end{table}
 
@@ -987,14 +1021,16 @@ Model & Seed & Original & Swapped & Fg-only & Bg-only & Gap swap & Flip \\
 \endhead
 \bottomrule
 \endfoot
-\input{tables/per_run}
+\tableinput tables/per_run.tex 
 \end{longtable}
 }
 
 \begin{figure}[p]
 \centering
-\includegraphics[height=0.92\textheight]{week1_gallery}
-\caption{Examples of the data pipeline: original image, trimap-based mask, swapped background, neutral background.}
+\includegraphics[width=0.8\textwidth]{week1_gallery_top}
+\caption{Examples from the data pipeline (first rows of the gallery made in week 1). Columns: original image, trimap
+(purple = pet, yellow = border, teal = background), pet on a new Places365 background (swapped), pet on the neutral
+gray background (fg-only), pet painted over with gray (bg-only).}
 \label{fig:gallery}
 \end{figure}
 
@@ -1124,9 +1160,9 @@ instead of the intended one.
 \item[Backbone / head] The feature extractor / the final linear classifier.
 \item[Epoch / step] One pass over the training set / one optimizer update on one batch.
 \item[Mixed precision (AMP)] Computing in 16-bit floats where safe, with loss scaling to avoid underflow.
-\item[Gap] Accuracy on original minus accuracy under a condition, in percentage points (\pp).
+\item[Gap] Accuracy on original minus accuracy under a condition, in percentage points (p.p.).
 \item[Flip rate] Share of images whose prediction changes between two conditions.
-\item[Percentage point (\pp)] Difference of two percentages: $89.7\%-86.9\%=2.8$\pp.
+\item[Percentage point (p.p.)] Difference of two percentages: $89.7\%-86.9\%=2.8$\pp.
 \item[Bootstrap CI] Uncertainty estimate obtained by resampling the test images with replacement.
 \item[Grad-CAM] Heat map of the image regions whose features raise the predicted class score.
 \item[Linear probe] A linear classifier trained on frozen features to measure what information they contain.
