@@ -121,7 +121,7 @@ class WaterbirdsDataset(Dataset):
 
 
 def _loader(ds, batch_size, shuffle, seed):
-    return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, num_workers=os.cpu_count(),
+    return DataLoader(ds, batch_size=batch_size, shuffle=shuffle, num_workers=int(os.environ.get("BGBIAS_WORKERS", os.cpu_count())),
                       pin_memory=torch.cuda.is_available(), generator=torch.Generator().manual_seed(seed))
 
 
