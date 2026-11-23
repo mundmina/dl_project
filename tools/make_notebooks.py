@@ -1515,3 +1515,315 @@ sync(REPO_DIR, "Case study: Waterbirds")
 
 (OUT / "07_case_waterbirds.ipynb").write_text(json.dumps(case_nb, indent=1, ensure_ascii=False))
 print("ok 07")
+
+
+
+attribution_nb = nb([
+    md(f'''
+# 08 · Attribution: how much of the decision comes from the pet vs the background
+{colab_badge("08_attribution.ipynb")}
+
+**Runtime → T4 GPU → Run all.** Ничего не обучает. Checkpoints берутся из архива тиммейта
+`MyDrive/dl/runs.zip` (только нужные `best.pt`, на локальный диск Colab, Drive не занимает).
+Если какого-то run в архиве нет — берётся `MyDrive/bgbias/runs/<run>/best.pt`.
+
+Единица измерения везде одна: **log p(верный класс | картинка)**.
+
+1. **Region Shapley** (все 13 моделей × 3 seed, весь test): каждую картинку показываем в 4 вариантах —
+   целиком, только животное, только фон, всё серое — и честно делим решение на вклад животного φ_pet
+   и вклад фона φ_bg (φ_pet + φ_bg = f(картинка) − f(серое)). Для swapped фон = новая сцена Places365.
+2. **Integrated Gradients** (ResNet-18 и методы, 500 тестовых картинок — те же, что для Grad-CAM):
+   вклад каждого пикселя, суммируем по маске животного и по фону. Сравниваем с Grad-CAM из `05_analysis`.
+3. Примеры карт IG для A и B, рисунки и таблицы → `report/figures/`, `results/analysis/` → push в GitHub.
+
+Время на T4: ≈ 15 мин копирование + ≈ 15 мин Shapley + ≈ 25 мин IG.
+'''),
+    SETUP,
+    code('''
+import torch
+assert torch.cuda.is_available(), "Runtime -> Change runtime type -> T4 GPU"
+'''),
+    PROJECT,
+    md("## 0. Checkpoints"),
+    code('''
+import shutil, zipfile
+ARCHIVE = Path("/content/drive/MyDrive/dl/runs.zip")
+CKPT = Path("/content/ckpt")
+SEEDS = (0, 1, 2)
+SHAPLEY_MODELS = ["resnet_A", "resnet_B", "resnet_gray", "resnet_blur", "resnet_cutmix", "resnet_rrr1",
+                  "resnet_rrr10", "scratch_A", "scratch_B", "resnet50_A", "resnet50_B",
+                  "convnext_A", "convnext_B", "swin_A", "swin_B"]
+IG_MODELS = ["resnet_A", "resnet_B", "resnet_gray", "resnet_blur", "resnet_cutmix", "resnet_rrr1", "resnet_rrr10"]
+
+members = {}
+if ARCHIVE.exists():
+    with zipfile.ZipFile(ARCHIVE) as z:
+        for n in z.namelist():
+            if n.endswith("/best.pt"):
+                members[n.split("/")[-2]] = n
+print(len(members), "best.pt in", ARCHIVE)
+
+def checkpoint(run):
+    dst = CKPT / run / "best.pt"
+    if dst.exists():
+        return dst
+    if run in members:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(ARCHIVE) as z, z.open(members[run]) as src, open(dst, "wb") as out:
+            shutil.copyfileobj(src, out)
+        return dst
+    if (RUNS / run / "best.pt").exists():
+        return RUNS / run / "best.pt"
+    return None
+
+paths = {}
+for m in SHAPLEY_MODELS:
+    for s in SEEDS:
+        p = checkpoint(f"{m}_seed{s}")
+        if p is None:
+            print("missing", f"{m}_seed{s}")
+        else:
+            paths[f"{m}_seed{s}"] = p
+print(len(paths), "checkpoints ready")
+'''),
+    code('''
+import numpy as np
+import pandas as pd
+from bgbias import analysis as A
+from bgbias.attribution import RegionViews, integrated_gradients, region_shapley, split_by_mask
+from bgbias.models import load_checkpoint
+from bgbias.project import make_dataset
+from bgbias.plotting import COLORS, INK2, saver, use_style
+import matplotlib.pyplot as plt
+from matplotlib.ticker import PercentFormatter
+
+device = torch.device("cuda")
+SPLIT = "test"
+FIG_DIR = Path(REPO_DIR) / "report" / "figures"
+TAB_DIR = Path(REPO_DIR) / "results" / "analysis"
+OUT_DRIVE = DRIVE_ROOT / "results" / "attribution"
+for d in (FIG_DIR, TAB_DIR, OUT_DRIVE):
+    d.mkdir(parents=True, exist_ok=True)
+use_style()
+save = saver(FIG_DIR)
+
+# all models stay on the GPU (~3 GB), so every image is rendered only once
+models = {run: load_checkpoint(p, data.num_classes, device)[0] for run, p in paths.items()}
+base = make_dataset(data, SPLIT, condition="swapped")
+print(len(models), "models,", len(base), "test images")
+'''),
+    md('''
+## 1. Region Shapley: вклад животного и фона (весь test)
+
+φ_pet = ½[(v(P+B) − v(B)) + (v(P) − v(∅))], φ_bg = ½[(v(P+B) − v(P)) + (v(B) − v(∅))],
+где v — log p(верный класс), P — животное, B — фон, ∅ — всё серое (как в fg-only / bg-only).
+**bg_share** = |φ_bg| / (|φ_pet| + |φ_bg|) — какая доля решения приходится на фон.
+**φ_bg < 0 на swapped** — новая сцена толкает модель от правильного ответа.
+'''),
+    code('''
+from torch.utils.data import DataLoader
+
+loader = DataLoader(RegionViews(base), batch_size=24, shuffle=False, num_workers=2, pin_memory=True)
+per_image = {run: {c: {k: [] for k in ("phi_pet", "phi_bg", "f_full", "f_gray")} for c in ("original", "swapped")}
+             for run in models}
+for b, (views, mask, y) in enumerate(loader):
+    views, y = views.to(device, non_blocking=True), y.to(device)
+    for run, model in models.items():
+        with torch.autocast("cuda", dtype=torch.float16):
+            res = region_shapley(model, views, y)
+        for c in res:
+            for k, v in res[c].items():
+                per_image[run][c][k].append(v.float().cpu())
+    if b % 20 == 0:
+        print(f"batch {b + 1}/{len(loader)}")
+
+rows = []
+for run, conds in per_image.items():
+    for c, vals in conds.items():
+        v = {k: torch.cat(x).numpy() for k, x in vals.items()}
+        rows.append(pd.DataFrame({"run": run, "model": A.model_name(run), "condition": c,
+                                  "image": np.arange(len(v["phi_pet"])), **v}))
+shap_img = pd.concat(rows, ignore_index=True)
+shap_img["bg_share"] = shap_img.phi_bg.abs() / (shap_img.phi_pet.abs() + shap_img.phi_bg.abs()).clip(lower=1e-8)
+shap_img.to_csv(OUT_DRIVE / "region_shapley_per_image.csv.gz", index=False)
+
+shap_run = (shap_img.groupby(["run", "model", "condition"])
+            .agg(phi_pet=("phi_pet", "mean"), phi_bg=("phi_bg", "mean"), bg_share=("bg_share", "mean"),
+                 bg_hurts=("phi_bg", lambda s: (s < 0).mean()), f_full=("f_full", "mean"))
+            .reset_index())
+shap_run.to_csv(TAB_DIR / "attribution_shapley_per_run.csv", index=False)
+shap_model = shap_run.groupby(["model", "condition"])[["phi_pet", "phi_bg", "bg_share", "bg_hurts"]].agg(["mean", "std"])
+shap_model.round(3)
+'''),
+    code('''
+# A vs B: paired bootstrap over test images (per-image values averaged over the 3 seeds first)
+def seed_mean(model, cond, col):
+    d = shap_img[(shap_img.model == model) & (shap_img.condition == cond)]
+    return d.groupby("image")[col].mean().to_numpy()
+
+rng = np.random.default_rng(0)
+boot_rows = []
+pairs = list(A.FAMILIES.items()) + [(k, ("resnet_A", m)) for k, m in A.METHODS.items() if m not in ("resnet_A", "resnet_B")]
+for fam, (ma, mb) in pairs:
+    if not ((shap_img.model == ma).any() and (shap_img.model == mb).any()):
+        continue
+    for cond in ("original", "swapped"):
+        for col in ("bg_share", "phi_bg"):
+            d = seed_mean(ma, cond, col) - seed_mean(mb, cond, col)
+            idx = rng.integers(0, len(d), size=(2000, len(d)))
+            bs = d[idx].mean(1)
+            boot_rows.append({"comparison": fam, "model_a": ma, "model_b": mb, "condition": cond, "metric": col,
+                              "difference": d.mean(), "ci_low": np.quantile(bs, 0.025), "ci_high": np.quantile(bs, 0.975)})
+shap_boot = pd.DataFrame(boot_rows)
+shap_boot.to_csv(TAB_DIR / "attribution_shapley_bootstrap.csv", index=False)
+shap_boot.round(4)
+'''),
+    code('''
+# Figure: architectures, A vs B
+fams = [f for f, (ma, mb) in A.FAMILIES.items() if (shap_run.model == ma).any() and (shap_run.model == mb).any()]
+stat = shap_run.groupby(["model", "condition"])[["bg_share", "phi_bg"]].agg(["mean", "std"])
+fig, axes = plt.subplots(1, 3, figsize=(14, 0.6 * len(fams) + 1.8), sharey=True)
+y = np.arange(len(fams))
+panels = ((axes[0], "original", "bg_share", "Share of the decision from the background\\n(original images)"),
+          (axes[1], "swapped", "bg_share", "Share of the decision from the background\\n(swapped background)"),
+          (axes[2], "swapped", "phi_bg", "Effect of the new background on log p(true class)\\n(swapped; < 0 = pushes away)"))
+for ax, cond, col, title in panels:
+    for variant, key, dy in (("A", "resnet_A", -0.12), ("B", "resnet_B", 0.12)):
+        ms = [A.FAMILIES[f][0 if variant == "A" else 1] for f in fams]
+        m = [stat.loc[(x, cond), (col, "mean")] for x in ms]
+        s = [stat.loc[(x, cond), (col, "std")] for x in ms]
+        ax.errorbar(m, y + dy, xerr=s, fmt="o", ms=7, color=COLORS[key], capsize=3,
+                    label="A: original images" if variant == "A" else "B: background swap p = 0.5")
+    ax.set_title(title)
+    if col == "bg_share":
+        ax.xaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+    else:
+        ax.axvline(0, color=INK2, lw=0.8)
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", visible=True, color="#ebeae6")
+axes[0].set_yticks(y, fams)
+axes[0].invert_yaxis()
+axes[2].legend(loc="lower left")
+fig.tight_layout()
+save(fig, "fig10_attribution_architectures")
+'''),
+    md('''
+## 2. Integrated Gradients (ResNet-18 и методы, 500 картинок)
+
+IG_i = (x_i − x'_i) · среднее по 32 шагам ∂f/∂x_i на пути от серого x' к x. Сумма IG по маске животного
+и по фону; **ig_on_pet** = доля |IG| на животном (сравнимо с Grad-CAM cam_on_pet).
+completeness — |ΣIG − (f(x) − f(x'))|, проверка, что 32 шагов достаточно.
+'''),
+    code('''
+rng = np.random.default_rng(0)
+sample = np.sort(rng.choice(len(base), size=500, replace=False))   # same 500 images as Grad-CAM in 05
+ig_views = RegionViews(base, indices=sample)
+gray = ig_views[0][0][5].to(device)   # all-gray view = IG baseline (same for every image)
+ig_runs = [r for r in models if A.model_name(r) in IG_MODELS]
+rows = []
+for k in range(len(ig_views)):
+    views, mask, label = ig_views[k]
+    views, mask = views.to(device), mask.to(device)
+    for run in ig_runs:
+        for cond, j in (("original", 0), ("swapped", 3)):
+            attr, err = integrated_gradients(models[run], views[j], label, gray, steps=32, chunk=32)
+            pet, bg, share = split_by_mask(attr, mask)
+            rows.append({"run": run, "model": A.model_name(run), "condition": cond, "image": int(sample[k]),
+                         "ig_pet": pet, "ig_bg": bg, "ig_on_pet": share, "completeness_err": err,
+                         "pet_area": mask.mean().item()})
+    if k % 50 == 0:
+        print(f"image {k + 1}/{len(ig_views)}")
+ig_img = pd.DataFrame(rows)
+ig_img.to_csv(OUT_DRIVE / "integrated_gradients_per_image.csv.gz", index=False)
+ig_run = ig_img.groupby(["run", "model", "condition"])[["ig_pet", "ig_bg", "ig_on_pet", "completeness_err", "pet_area"]].mean().reset_index()
+ig_run.to_csv(TAB_DIR / "attribution_ig_per_run.csv", index=False)
+ig_run.groupby(["model", "condition"])[["ig_pet", "ig_bg", "ig_on_pet", "completeness_err"]].agg(["mean", "std"]).round(3)
+'''),
+    code('''
+# Figure: methods (ResNet-18): Shapley background effect and IG vs Grad-CAM share on the pet
+cam = pd.read_csv(TAB_DIR / "gradcam_foreground_share.csv")
+meth = [(label, m) for label, m in A.METHODS.items() if (ig_run.model == m).any()]
+yy = np.arange(len(meth))
+fig, axes = plt.subplots(1, 2, figsize=(12, 0.55 * len(meth) + 1.8), sharey=True)
+for dy, cond, color in ((-0.12, "original", "#9a9893"), (0.12, "swapped", INK2)):
+    d = shap_run[shap_run.condition == cond].groupby("model").phi_bg.agg(["mean", "std"])
+    axes[0].errorbar([d.loc[m, "mean"] for _, m in meth], yy + dy, xerr=[d.loc[m, "std"] for _, m in meth],
+                     fmt="o", ms=7, color=color, capsize=3, label=f"{cond} images")
+axes[0].axvline(0, color=INK2, lw=0.8)
+axes[0].set_title("Shapley: effect of the background on log p(true class)")
+axes[0].legend(loc="lower left")
+for dy, src, col, color, lab in ((-0.12, ig_run, "ig_on_pet", COLORS["resnet_B"], "Integrated Gradients"),
+                                 (0.12, cam, "cam_on_pet", COLORS["resnet_A"], "Grad-CAM")):
+    d = src[src.condition == "swapped"].groupby("model")[col].agg(["mean", "std"])
+    axes[1].errorbar([d.loc[m, "mean"] for _, m in meth], yy + dy, xerr=[d.loc[m, "std"] for _, m in meth],
+                     fmt="o", ms=7, color=color, capsize=3, label=lab)
+area = ig_run.pet_area.mean()
+axes[1].axvline(area, color=INK2, lw=0.8, ls="--")
+axes[1].annotate("pet area", (area, len(meth) - 0.4), ha="center", fontsize=8, color=INK2)
+axes[1].xaxis.set_major_formatter(PercentFormatter(1.0, decimals=0))
+axes[1].set_title("Share of attribution on the pet (swapped images)")
+axes[1].legend(loc="lower right")
+for ax in axes:
+    ax.grid(axis="y", visible=False)
+    ax.grid(axis="x", visible=True, color="#ebeae6")
+axes[0].set_yticks(yy, [label for label, _ in meth])
+axes[0].invert_yaxis()
+fig.tight_layout()
+save(fig, "fig11_attribution_methods")
+'''),
+    md("## 3. Примеры: карты IG для A и B (seed 0)"),
+    code('''
+from scipy.ndimage import gaussian_filter
+from bgbias.datasets import IMAGENET_MEAN, IMAGENET_STD
+
+# images from the IG sample where the new scene hurts A most and B least
+d = shap_img[(shap_img.condition == "swapped") & shap_img.image.isin(sample)]
+a = d[d.run == "resnet_A_seed0"].set_index("image").phi_bg
+b = d[d.run == "resnet_B_seed0"].set_index("image").phi_bg
+pick = list((a - b).sort_values().index[:4])
+pos = {int(i): k for k, i in enumerate(sample)}
+
+def to_img(x):
+    m, s = torch.tensor(IMAGENET_MEAN)[:, None, None], torch.tensor(IMAGENET_STD)[:, None, None]
+    return (x.cpu() * s + m).clamp(0, 1).permute(1, 2, 0).numpy()
+
+def heat(attr):
+    h = gaussian_filter(attr.abs().cpu().numpy(), 3)
+    return h / max(h.max(), 1e-12)
+
+breed = dict(zip(data.splits[SPLIT].label, data.splits[SPLIT].breed))
+fig, axes = plt.subplots(len(pick), 6, figsize=(15, 2.6 * len(pick)))
+for r, img_idx in enumerate(pick):
+    views, mask, label = ig_views[pos[img_idx]]
+    views = views.to(device)
+    cols = []
+    for j, cond in ((0, "original"), (3, "swapped")):
+        cols.append((to_img(views[j]), None, cond))
+        for run, key in (("resnet_A_seed0", "A"), ("resnet_B_seed0", "B")):
+            attr, _ = integrated_gradients(models[run], views[j], label, gray, steps=32, chunk=32)
+            with torch.no_grad():
+                pred = models[run](views[j][None]).argmax(1).item()
+            cols.append((to_img(views[j]), heat(attr), f"{key}: {breed[pred]}" + (" ✓" if pred == label else " ✗")))
+    for c, (im, h, title) in enumerate(cols):
+        ax = axes[r, c]
+        ax.imshow(im)
+        if h is not None:
+            ax.imshow(h, cmap="inferno", alpha=0.55)
+        ax.set_title(title, fontsize=8, color="#c2271d" if title.endswith("✗") else INK2)
+        ax.axis("off")
+    axes[r, 0].set_title(f"original · true: {breed[label]}", fontsize=8)
+fig.tight_layout()
+save(fig, "fig12_ig_examples")
+'''),
+    md("## Сохранение и push"),
+    code('''
+from bgbias.github_sync import sync
+
+shutil.copytree(FIG_DIR, DRIVE_ROOT / "figures", dirs_exist_ok=True)
+shutil.copytree(TAB_DIR, DRIVE_ROOT / "results" / "analysis", dirs_exist_ok=True)
+sync(REPO_DIR, "Attribution: region Shapley (all models) and Integrated Gradients (ResNet-18)")
+'''),
+])
+
+(OUT / "08_attribution.ipynb").write_text(json.dumps(attribution_nb, indent=1, ensure_ascii=False))
+print("ok 08")
