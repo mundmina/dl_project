@@ -246,11 +246,45 @@ area = None
 for r in rows(RES / "analysis" / "gradcam_foreground_share.csv"):
     gc[(r["model"], r["condition"])].append(float(r["cam_on_pet"]))
     area = float(r["pet_area"])
+ig = defaultdict(list)
+ig_err = []
+for r in rows(RES / "analysis" / "attribution_ig_per_run.csv"):
+    ig[(r["model"], r["condition"])].append(float(r["ig_on_pet"]))
+    ig_err.append(float(r["completeness_err"]))
 lines = []
 for m in ("resnet_A", "resnet_B", "resnet_gray", "resnet_blur", "resnet_cutmix", "resnet_rrr1", "resnet_rrr10"):
     if (m, "original") in gc:
-        lines.append(" & ".join([LABEL[m], f"{st.mean(gc[(m, 'original')]):.3f}", f"{st.mean(gc[(m, 'swapped')]):.3f}"]) + " \\\\")
+        cells = [LABEL[m], f"{st.mean(gc[(m, 'original')]):.3f}", f"{st.mean(gc[(m, 'swapped')]):.3f}"]
+        cells += [f"{st.mean(ig[(m, c)]):.3f}" if (m, c) in ig else "--" for c in ("original", "swapped")]
+        lines.append(" & ".join(cells) + " \\\\")
 write("gradcam", "\n".join(lines) + "\n")
+
+# ---------------------------------------------------------------- Table: region Shapley (pet vs background)
+sh = defaultdict(lambda: defaultdict(list))
+for r in rows(RES / "analysis" / "attribution_shapley_per_run.csv"):
+    for k in ("phi_pet", "phi_bg", "bg_share", "bg_hurts"):
+        sh[(r["model"], r["condition"])][k].append(float(r[k]))
+
+
+def num(mean, std, d=2):
+    return neg(f"{mean:.{d}f}") + f" $\\pm$ {std:.{d}f}"
+
+
+lines = []
+for m in ORDER:
+    if (m, "original") not in sh:
+        continue
+    o, s = sh[(m, "original")], sh[(m, "swapped")]
+    lines.append(" & ".join([
+        LABEL[m],
+        num(*mean_std(o["phi_pet"])), num(*mean_std(o["phi_bg"])), pm(*mean_std(o["bg_share"])),
+        num(*mean_std(s["phi_bg"])), pm(*mean_std(s["bg_share"])), pct(st.mean(s["bg_hurts"]), 0),
+    ]) + " \\\\")
+    if m in ("resnet_rrr10", "scratch_B"):
+        lines.append("\\midrule")
+write("attribution", "\n".join(lines) + "\n")
+shap_boot = {(r["model_a"], r["model_b"], r["condition"], r["metric"]): r
+             for r in rows(RES / "analysis" / "attribution_shapley_bootstrap.csv")}
 
 # ---------------------------------------------------------------- Appendix: every Pet run
 lines = []
@@ -268,4 +302,20 @@ macros = {
     "gradcamArea": f"{area:.2f}",
     "catGapA": pct(sp["cat"][0]), "catGapB": pct(sp["cat"][1]), "dogGapA": pct(sp["dog"][0]), "dogGapB": pct(sp["dog"][1]),
 }
+# attribution: ResNet-18 A vs B
+for tag, m in (("A", "resnet_A"), ("B", "resnet_B")):
+    for ctag, c in (("Orig", "original"), ("Swap", "swapped")):
+        macros[f"shapShare{tag}{ctag}"] = pct(st.mean(sh[(m, c)]["bg_share"]))
+        macros[f"shapBg{tag}{ctag}"] = neg(f"{st.mean(sh[(m, c)]['phi_bg']):.2f}")
+        macros[f"shapPet{tag}{ctag}"] = f"{st.mean(sh[(m, c)]['phi_pet']):.2f}"
+    macros[f"shapHurts{tag}Swap"] = pct(st.mean(sh[(m, "swapped")]["bg_hurts"]), 0)
+    macros[f"igPet{tag}"] = pct(st.mean(ig[(m, "original")]), 0)
+for ctag, c in (("Orig", "original"), ("Swap", "swapped")):
+    for mtag, metric, f in (("Share", "bg_share", lambda x: pct(x)), ("Bg", "phi_bg", lambda x: neg(f"{float(x):.2f}"))):
+        b = shap_boot[("resnet_A", "resnet_B", c, metric)]
+        macros[f"shapBoot{mtag}{ctag}"] = f(b["difference"])
+        macros[f"shapBoot{mtag}{ctag}Lo"] = f(b["ci_low"])
+        macros[f"shapBoot{mtag}{ctag}Hi"] = f(b["ci_high"])
+macros["igErr"] = f"{st.mean(ig_err):.2f}"
+macros["igRRRten"] = pct(st.mean(ig[("resnet_rrr10", "original")]), 0)
 write("numbers", "\n".join(f"\\newcommand{{\\{k}}}{{{v}}}" for k, v in macros.items()) + "\n")

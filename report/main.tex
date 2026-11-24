@@ -58,7 +58,9 @@ shrinks to $0.5\pm0.2$\pp{} (paired bootstrap difference \bootDiff\pp, 95\% CI [
 accuracy on original images. The effect holds for all five architectures, an ablation shows that $p=0.25$ already
 removes most of the gap, and among six training strategies (gray background, blurred background, CutMix, an
 input-gradient saliency penalty with $\lambda\in\{1,10\}$, random scene swap) only the random scene swap removes it.
-Linear probes show that swap training removes most background-scene information from the learned features. The
+Linear probes show that swap training removes most background-scene information from the learned features, and a
+region-level Shapley attribution shows that it cuts the harm a foreign scene does to the true-class log-probability from
+\shapBgASwap{} to \shapBgBSwap{} nats. The
 background-only condition stays close to chance for ResNet-18, so the model is \emph{distracted} by unfamiliar
 backgrounds rather than reading the breed off the background. Finally, the same remedy transfers to two settings
 it was not designed on: real photographs from Stanford Dogs, and the Waterbirds shortcut benchmark, where it raises
@@ -125,7 +127,9 @@ plausible one.
 (i) A controlled evaluation protocol with four test conditions and fixed, reproducible test backgrounds drawn from
 scene categories that never occur in training. (ii) A comparison of 17 trained configurations, 51 runs in total
 (3 seeds each), plus a classical baseline. (iii) Statistical tests (paired bootstrap) for the main claims.
-(iv) Mechanistic analyses: per-breed gaps, Grad-CAM, and linear probes of background information in the features.
+(iv) Mechanistic analyses: per-breed gaps, Grad-CAM, region-level Shapley attribution (how much of each decision comes
+from the pet and how much from the background), Integrated Gradients, and linear probes of background information in
+the features.
 (v) Two transfer studies: an external test on real photos (Stanford Dogs) and a case study on Waterbirds.
 
 %======================================================================
@@ -489,6 +493,42 @@ upsampled bilinearly to $224\times224$ and scaled to $[0,1]$. We summarise a map
 using the mask cropped exactly like the image. It is computed on 500 test images for every seed; the pet covers on
 average \gradcamArea{} of those crops, so a map that ignored the mask would score about \gradcamArea.
 
+\paragraph{Region Shapley attribution: the weight of pet and background.} Grad-CAM shows \emph{where} the gradient is
+large, not \emph{how much} each part of the image contributes to the decision. To measure the contribution directly we
+treat the image as a game with two players, the pet $P$ and the background $B$, and the value of a coalition as the
+log-probability of the true class,
+\begin{equation}
+  v(S)=\log p_\theta\big(y\mid x_S\big),\qquad S\subseteq\{P,B\},
+\end{equation}
+where $x_S$ keeps the regions in $S$ and paints the others neutral gray (the same gray as in fg-only and bg-only).
+So $v(P{+}B)$ is the full image, $v(P)$ the fg-only image, $v(B)$ the bg-only image and $v(\varnothing)$ an all-gray
+image. With two players the Shapley value \cite{shapley1953value,lundberg2017shap} is exact and needs four forward passes:
+\begin{equation}
+  \phi_P=\tfrac12\big[(v(P{+}B)-v(B))+(v(P)-v(\varnothing))\big],\qquad
+  \phi_B=\tfrac12\big[(v(P{+}B)-v(P))+(v(B)-v(\varnothing))\big],
+\end{equation}
+and $\phi_P+\phi_B=v(P{+}B)-v(\varnothing)$ (efficiency). Each value averages a region's marginal effect over both
+orders in which it can be added. Units are nats of log-probability: $\phi_B=-0.4$ means the background lowers the
+probability of the true class by a factor $e^{0.4}\approx1.5$. We report $\phi_B$ and the background share
+\begin{equation}
+  \text{bg share}=\frac{|\phi_B|}{|\phi_P|+|\phi_B|},
+\end{equation}
+on original images (the background is the pet's own) and on swapped images (the background is the foreign Places365
+scene; $v(B)$ is then the swapped bg-only image). Values are computed for every test image and every run of all 15
+deep configurations; differences A$-$B get a paired bootstrap CI over images exactly as for the gap. Unlike Grad-CAM,
+this works for every architecture, including the transformers, because it needs only forward passes.
+
+\paragraph{Integrated Gradients.} For a pixel-level view of the same quantity we use Integrated Gradients
+\cite{sundararajan2017ig} with the all-gray image $x'$ as baseline:
+\begin{equation}
+  \mathrm{IG}_u(x)=(x_u-x'_u)\int_0^1\frac{\partial f\big(x'+\alpha(x-x')\big)}{\partial x_u}\,d\alpha
+  \;\approx\;(x_u-x'_u)\,\frac1m\sum_{k=1}^{m}\frac{\partial f\big(x'+\tfrac km(x-x')\big)}{\partial x_u},
+\end{equation}
+with $f(x)=\log p_\theta(y\mid x)$, $m=32$ steps, summed over colour channels. IG satisfies completeness,
+$\sum_u\mathrm{IG}_u(x)=f(x)-f(x')$; the mean absolute error of the 32-step approximation is \igErr{} nats, about 10\%
+of $f(x)-f(x')$. We summarise a map like Grad-CAM, by the share of $|\mathrm{IG}|$ on the pet mask, on the same 500
+test images, for the seven ResNet-18 strategies.
+
 \paragraph{Linear probe of background information.} How much does a model's internal representation know about the
 background? We take the penultimate features $h(x)$ (the input of the classifier) of every \emph{swapped} test image
 and train a linear classifier to predict the Places365 \emph{scene category} of its background (87 categories,
@@ -703,15 +743,18 @@ $+0.7$ and $-5.7$\pp. On average cats have a larger gap than dogs for A (\catGap
 \begin{table}[h]
 \centering\small
 \begin{adjustbox}{max width=\linewidth}
-\begin{tabular}{lcc}
+\begin{tabular}{lcccc}
 \toprule
-Model & CAM-on-pet, original & CAM-on-pet, swapped \\
+& \multicolumn{2}{c}{Grad-CAM on pet} & \multicolumn{2}{c}{IG on pet} \\
+\cmidrule(lr){2-3}\cmidrule(lr){4-5}
+Model & original & swapped & original & swapped \\
 \midrule
 \tableinput tables/gradcam.tex 
 \bottomrule
 \end{tabular}
 \end{adjustbox}
-\caption{Share of Grad-CAM mass on the pet (500 test images $\times$ 3 seeds). Pet area $\approx$ \gradcamArea.}
+\caption{Share of Grad-CAM mass and of $|\mathrm{IG}|$ on the pet (the same 500 test images, mean over 3 seeds).
+Pet area $\approx$ \gradcamArea.}
 \label{tab:gradcam}
 \end{table}
 \begin{figure}[p]
@@ -727,6 +770,85 @@ differ (Table~\ref{tab:gradcam}). So Grad-CAM does not show the difference that 
 This is a known limitation of Grad-CAM: it is coarse ($7\times7$), it explains only the predicted class, and a model
 can look mostly at the pet while a small amount of background context still changes the decision on ambiguous images.
 Figure~\ref{fig:gradcam} shows such flips.
+
+\subsection{How much of the decision comes from the pet and how much from the background?}\label{sec:attribution}
+\begin{table}[h]
+\centering\small
+\begin{adjustbox}{max width=\linewidth}
+\begin{tabular}{lcccccc}
+\toprule
+& \multicolumn{3}{c}{Original images} & \multicolumn{3}{c}{Swapped background} \\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+Model & $\phi_P$ (nats) & $\phi_B$ (nats) & bg share (\%) & $\phi_B$ (nats) & bg share (\%) & $\phi_B<0$ (\%) \\
+\midrule
+\tableinput tables/attribution.tex 
+\bottomrule
+\end{tabular}
+\end{adjustbox}
+\caption{Region Shapley attribution of $\log p(\text{true class})$ to the pet ($\phi_P$) and the background ($\phi_B$),
+whole test set, mean $\pm$ std over 3 seeds. ``$\phi_B<0$'' = share of swapped images on which the new background
+lowers the probability of the true class.}
+\label{tab:attribution}
+\end{table}
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{fig10_attribution_architectures}
+\caption{Region Shapley by architecture, A (blue) vs B (orange). Left and middle: background share of the decision on
+original and swapped images. Right: $\phi_B$ of the foreign background on swapped images (below 0 = it pushes the model
+away from the true class). Whiskers: spread over seeds.}
+\label{fig:attr-arch}
+\end{figure}
+\begin{figure}[t]
+\centering
+\includegraphics[width=\textwidth]{fig11_attribution_methods}
+\caption{Strategies for handling the background (ResNet-18). Left: $\phi_B$ on original (light) and swapped (dark)
+images. Right: share of attribution on the pet for swapped images, Integrated Gradients vs Grad-CAM; dashed line = pet
+area.}
+\label{fig:attr-methods}
+\end{figure}
+
+This analysis answers the question directly: what fraction of each decision is due to the pet, and what fraction to
+the background (Table~\ref{tab:attribution}, Figures~\ref{fig:attr-arch}--\ref{fig:attr-methods}).
+
+\paragraph{The pet carries most of the decision.} For every pretrained model the pet accounts for $85$--$95\%$ of the
+decision: ResNet-18 A has $\phi_P=\shapPetAOrig$ nats against $\phi_B=\shapBgAOrig$ on original images (background
+share \shapShareAOrig\%). The exception is the model trained from scratch: 23\% of its decision comes from the
+background, and its own background raises the true class by $0.74$ nats. Without ImageNet features, the small Pet
+training set pushes the model to use context.
+
+\paragraph{The foreign background actively hurts A, and swapping removes that.} On swapped images the new scene lowers
+A's log-probability of the true class by \shapBgASwap{} nats on average (a factor $\approx1.5$ in probability) and
+lowers it on \shapHurtsASwap\% of images. For B the effect is \shapBgBSwap{} nats (\shapHurtsBSwap\%, closer to the 50\%
+expected for a background that does not matter). The paired bootstrap difference A$-$B in $\phi_B$ is \shapBootBgSwap{}
+nats (95\% CI [\shapBootBgSwapLo, \shapBootBgSwapHi]), and the background share drops from \shapShareASwap\% to
+\shapShareBSwap\% (difference \shapBootShareSwap\pp, CI [\shapBootShareSwapLo, \shapBootShareSwapHi]). On original
+images A's own background helps slightly ($+\shapBgAOrig$ nats) and B's does not ($\shapBgBOrig$). This is the
+attribution-level version of the main result: A gives the background a small positive weight when it is familiar and
+a large negative one when it is not; B gives it almost none in both cases.
+
+\paragraph{Across architectures.} The same pattern holds for ResNet-50, ConvNeXt-T and Swin-T: B moves $\phi_B$ on
+swapped images towards zero and lowers the background share (Figure~\ref{fig:attr-arch}). Swin-T has the largest
+background share among pretrained models, and B only halves its negative $\phi_B$, which matches its remaining flip rate.
+
+\paragraph{Across strategies.} Only the random scene swap brings $\phi_B$ on swapped images close to zero with a small
+seed spread. A blurred background leaves it as negative as A ($-0.40$); CutMix and the saliency penalty with $\lambda=1$
+reduce it only partly; the gray background and $\lambda=10$ give an average near zero but with a seed spread larger than
+the effect (Figure~\ref{fig:attr-methods}). As with the robustness gap, only the random scene swap removes the effect
+reliably.
+
+\paragraph{Pixel level: Integrated Gradients.} IG puts \igPetA\% of A's attribution on the pet and \igPetB\% of B's
+(Table~\ref{tab:gradcam}), so at pixel level B does look more at the pet, which Grad-CAM at $7\times7$ could not
+resolve. The saliency penalty reaches the highest IG share (\igRRRten\% at $\lambda=10$), yet it is the least robust
+model: it is trained to have small input gradients on the background, and IG is built from input gradients, so a high
+IG share here reflects the training objective rather than robustness. Figure~\ref{fig:ig} shows examples; on some of the
+swapped images that A gets wrong, part of its attribution moves into the new scene.
+\begin{figure}[p]
+\centering
+\includegraphics[width=\textwidth]{fig12_ig_examples}
+\caption{Integrated Gradients of $\log p(\text{true class})$ for A and B. Columns: original image, IG of A, IG of B,
+swapped image, IG of A, IG of B (red title = wrong prediction).}
+\label{fig:ig}
+\end{figure}
 
 \subsection{What do the features know about the background? Probing}
 \begin{table}[h]
@@ -852,7 +974,9 @@ this model. (2) Yet swapping the background changes $8.4\%$ of A's predictions. 
 would change none; a model that used a breed--background association would also do well on bg-only. The consistent
 picture is that A's features mix pet and scene, and an unfamiliar scene shifts the features enough to push ambiguous
 images (Staffordshire vs pit bull) across a decision boundary. Probing supports this: A's features still encode the
-scene, B's mostly do not.
+scene, B's mostly do not. The Shapley attribution adds the direct measurement: the background is a small part of A's
+decision (about 11\%), slightly helpful when it is the pet's own and clearly harmful when it is foreign
+(Section~\ref{sec:attribution}).
 
 \paragraph{Why random scenes work and gray/blur do not fully.} Gray and blur teach invariance to the \emph{absence} of
 a background. The swapped test asks for invariance to the \emph{presence of a wrong} background. Only random scenes
@@ -894,6 +1018,9 @@ honest exception.
   are almost empty. On Waterbirds, DeepLabV3 masks are imperfect (images with a mask below 0.5\% of the area are left
   unswapped).
   \item \textbf{Silhouette leakage} in bg-only (see Discussion).
+  \item \textbf{Attribution baselines.} Region Shapley and IG both use a gray image as the ``absent'' input, which the
+  models never saw in training; absolute values depend on this choice, comparisons between models do not. IG with 32
+  steps has a completeness error of about 10\%.
   \item \textbf{Hyperparameters} were tuned for ResNet-18 A and reused for all models; each architecture might do
   better with its own recipe. HOG's best $C$ lies at the edge of the grid, so the baseline may be slightly
   under-tuned (it is not central to any claim).
@@ -946,6 +1073,9 @@ evaluation metrics, error analysis. Assylkhan Tleubayev: training pipeline, mode
 \bibitem{parkhi2012cats} O.~M.~Parkhi, A.~Vedaldi, A.~Zisserman, and C.~V.~Jawahar. Cats and dogs. In \emph{CVPR}, 2012.
 \bibitem{ribeiro2016lime} M.~T.~Ribeiro, S.~Singh, and C.~Guestrin. ``Why should I trust you?'' Explaining the predictions of any classifier. In \emph{KDD}, 2016.
 \bibitem{ross2017rrr} A.~S.~Ross, M.~C.~Hughes, and F.~Doshi-Velez. Right for the right reasons: Training differentiable models by constraining their explanations. In \emph{IJCAI}, 2017.
+\bibitem{lundberg2017shap} S.~M.~Lundberg and S.-I.~Lee. A unified approach to interpreting model predictions. In \emph{NeurIPS}, 2017.
+\bibitem{shapley1953value} L.~S.~Shapley. A value for $n$-person games. In \emph{Contributions to the Theory of Games II}, Annals of Mathematics Studies 28, pages 307--317. Princeton University Press, 1953.
+\bibitem{sundararajan2017ig} M.~Sundararajan, A.~Taly, and Q.~Yan. Axiomatic attribution for deep networks. In \emph{ICML}, 2017.
 \bibitem{sagawa2020dro} S.~Sagawa, P.~W.~Koh, T.~B.~Hashimoto, and P.~Liang. Distributionally robust neural networks for group shifts. In \emph{ICLR}, 2020.
 \bibitem{selvaraju2017gradcam} R.~R.~Selvaraju, M.~Cogswell, A.~Das, R.~Vedantam, D.~Parikh, and D.~Batra. Grad-CAM: Visual explanations from deep networks via gradient-based localization. In \emph{ICCV}, 2017.
 \bibitem{wah2011cub} C.~Wah, S.~Branson, P.~Welinder, P.~Perona, and S.~Belongie. The Caltech-UCSD Birds-200-2011 dataset. Technical report CNS-TR-2011-001, Caltech, 2011.
@@ -1085,6 +1215,19 @@ Grad-CAM has $7\times7$ resolution, explains one class, and measures where the g
 not how much the decision would change if the background changed. Both models look mostly at the pet; the difference
 lies in how much the remaining $20\%$ of attention can move the decision, which accuracy, flip rate and probing measure
 directly.
+Integrated Gradients, which works at pixel level, does show it: \igPetA\% of A's attribution is on the pet against
+\igPetB\% for B (Table~\ref{tab:gradcam}), and the region Shapley values measure the effect on the decision itself.
+
+\item[What does the background share mean, and why gray as the ``absent'' region?]
+It is the fraction of the decision (in log-probability of the true class) that the background accounts for, split
+fairly between pet and background by the Shapley value. Gray is the same neutral fill that defines fg-only and bg-only,
+so all quantities live on the conditions we already evaluate. A gray region is itself unusual for the model, so the
+absolute values depend on this choice; comparisons between models use the same baseline and are fair.
+
+\item[What is the Shapley value?]
+For a game with players and a value of every coalition, a player's Shapley value is its marginal contribution averaged
+over all orders in which players can join. It is the unique split that is efficient (contributions add up to the total),
+symmetric and additive. With two players (pet, background) it needs only the four images above.
 
 \item[What exactly is the probe measuring and why on swapped images?]
 On swapped images the scene category is random and known for every image, so it is a clean label that is independent
@@ -1165,6 +1308,12 @@ instead of the intended one.
 \item[Percentage point (p.p.)] Difference of two percentages: $89.7\%-86.9\%=2.8$\pp.
 \item[Bootstrap CI] Uncertainty estimate obtained by resampling the test images with replacement.
 \item[Grad-CAM] Heat map of the image regions whose features raise the predicted class score.
+\item[Shapley value] A player's marginal contribution averaged over all orders in which players can join; here the
+players are the pet and the background, and the value is $\log p(\text{true class})$.
+\item[Background share] $|\phi_B|/(|\phi_P|+|\phi_B|)$: the fraction of the decision attributed to the background.
+\item[Integrated Gradients] Pixel attribution that integrates the gradient along a straight path from a baseline image
+to the input; the attributions sum to $f(x)-f(\text{baseline})$.
+\item[Nat] Unit of log-probability (natural logarithm); $-0.4$ nats = probability divided by $e^{0.4}\approx1.5$.
 \item[Linear probe] A linear classifier trained on frozen features to measure what information they contain.
 \item[Worst-group accuracy] The lowest accuracy over predefined subgroups of the test set.
 \item[Distribution shift] A test distribution that differs from the training distribution.

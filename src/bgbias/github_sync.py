@@ -15,14 +15,22 @@ GIT_NAME, GIT_EMAIL = "mundmina", "mundmina@users.noreply.github.com"
 RESULT_PATHS = ("splits", "manifests", "results", "report/figures")
 
 
+def _copy_new(src, dst):
+    """Copy a file only if the repo does not have it yet."""
+    if not Path(dst).exists():
+        shutil.copy2(src, dst)
+
+
 def _copy(src, dst):
+    """Drive -> repo without overwriting: the repo holds the final results (PR #1 reruns),
+    while Drive still has older copies of the same files, which must never replace them."""
     if not src.exists():
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
-        shutil.copytree(src, dst, dirs_exist_ok=True)
+        shutil.copytree(src, dst, dirs_exist_ok=True, copy_function=_copy_new)
     else:
-        shutil.copy(src, dst)
+        _copy_new(src, dst)
 
 
 def collect_results(repo_dir, drive_root=DRIVE_ROOT):

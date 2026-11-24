@@ -1,122 +1,122 @@
 [
  {
   "epoch": 0,
-  "train_loss": 1.1626728660310321,
-  "train_acc": 0.7976342710997443,
+  "train_loss": 1.162676412964721,
+  "train_acc": 0.7973145780051151,
   "val_acc_original": 0.9528985507246377,
-  "val_acc_swapped": 0.9438405797101449,
-  "time_s": 37.9
+  "val_acc_swapped": 0.9420289855072463,
+  "time_s": 26.0
  },
  {
   "epoch": 1,
-  "train_loss": 0.12919607320252588,
-  "train_acc": 0.9702685421994884,
+  "train_loss": 0.12921945156191317,
+  "train_acc": 0.9705882352941176,
   "val_acc_original": 0.9601449275362319,
   "val_acc_swapped": 0.9547101449275363,
-  "time_s": 32.4
+  "time_s": 26.0
  },
  {
   "epoch": 2,
-  "train_loss": 0.05266543933669167,
+  "train_loss": 0.052668461409371224,
   "train_acc": 0.9916879795396419,
   "val_acc_original": 0.9565217391304348,
-  "val_acc_swapped": 0.9583333333333334,
-  "time_s": 38.7
+  "val_acc_swapped": 0.9565217391304348,
+  "time_s": 25.9
  },
  {
   "epoch": 3,
-  "train_loss": 0.027396909063658142,
-  "train_acc": 0.9968030690537084,
+  "train_loss": 0.02738769583956665,
+  "train_acc": 0.9964833759590793,
   "val_acc_original": 0.9692028985507246,
   "val_acc_swapped": 0.9637681159420289,
-  "time_s": 39.3
+  "time_s": 25.7
  },
  {
   "epoch": 4,
-  "train_loss": 0.019280488633781748,
-  "train_acc": 0.9977621483375959,
+  "train_loss": 0.01930755064787005,
+  "train_acc": 0.9974424552429667,
   "val_acc_original": 0.9637681159420289,
   "val_acc_swapped": 0.9583333333333334,
-  "time_s": 40.6
+  "time_s": 26.1
  },
  {
   "epoch": 5,
-  "train_loss": 0.013979536795612339,
+  "train_loss": 0.013998462495815647,
   "train_acc": 0.9987212276214834,
-  "val_acc_original": 0.9637681159420289,
+  "val_acc_original": 0.9655797101449275,
   "val_acc_swapped": 0.9565217391304348,
-  "time_s": 39.0
+  "time_s": 26.0
  },
  {
   "epoch": 6,
-  "train_loss": 0.010146076770742302,
+  "train_loss": 0.01015564681881148,
   "train_acc": 0.9996803069053708,
   "val_acc_original": 0.9655797101449275,
   "val_acc_swapped": 0.9619565217391305,
-  "time_s": 37.9
+  "time_s": 25.8
  },
  {
   "epoch": 7,
-  "train_loss": 0.007608153703658248,
+  "train_loss": 0.007618984382580537,
   "train_acc": 0.9996803069053708,
   "val_acc_original": 0.9692028985507246,
-  "val_acc_swapped": 0.9583333333333334,
-  "time_s": 37.0
+  "val_acc_swapped": 0.9565217391304348,
+  "time_s": 25.8
  },
  {
   "epoch": 8,
-  "train_loss": 0.006232082615118198,
+  "train_loss": 0.0062386838194040005,
   "train_acc": 0.9996803069053708,
   "val_acc_original": 0.9692028985507246,
   "val_acc_swapped": 0.9637681159420289,
-  "time_s": 37.1
+  "time_s": 26.0
  },
  {
   "epoch": 9,
-  "train_loss": 0.004700869117575266,
+  "train_loss": 0.0046997016642357,
   "train_acc": 1.0,
   "val_acc_original": 0.9692028985507246,
   "val_acc_swapped": 0.9637681159420289,
-  "time_s": 37.1
+  "time_s": 25.7
  },
  {
   "epoch": 10,
-  "train_loss": 0.004167323873695129,
+  "train_loss": 0.004169189146079142,
   "train_acc": 1.0,
   "val_acc_original": 0.9692028985507246,
   "val_acc_swapped": 0.9637681159420289,
-  "time_s": 38.0
+  "time_s": 26.0
  },
  {
   "epoch": 11,
-  "train_loss": 0.004602787577930619,
+  "train_loss": 0.004606168307459263,
   "train_acc": 1.0,
   "val_acc_original": 0.9710144927536232,
   "val_acc_swapped": 0.9655797101449275,
-  "time_s": 37.0
+  "time_s": 25.8
  },
  {
   "epoch": 12,
-  "train_loss": 0.004521479792333186,
+  "train_loss": 0.004516276065557909,
   "train_acc": 0.9996803069053708,
   "val_acc_original": 0.9710144927536232,
   "val_acc_swapped": 0.9655797101449275,
-  "time_s": 37.6
+  "time_s": 25.8
  },
  {
   "epoch": 13,
-  "train_loss": 0.004438997832867686,
+  "train_loss": 0.004439014522835155,
   "train_acc": 1.0,
   "val_acc_original": 0.9710144927536232,
   "val_acc_swapped": 0.9655797101449275,
-  "time_s": 37.5
+  "time_s": 25.9
  },
  {
   "epoch": 14,
-  "train_loss": 0.0038855280619962593,
+  "train_loss": 0.003884323250950145,
   "train_acc": 1.0,
   "val_acc_original": 0.9710144927536232,
   "val_acc_swapped": 0.9655797101449275,
-  "time_s": 37.6
+  "time_s": 25.7
  }
 ]
