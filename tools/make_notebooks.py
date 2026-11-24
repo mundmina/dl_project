@@ -1827,3 +1827,204 @@ sync(REPO_DIR, "Attribution: region Shapley (all models) and Integrated Gradient
 
 (OUT / "08_attribution.ipynb").write_text(json.dumps(attribution_nb, indent=1, ensure_ascii=False))
 print("ok 08")
+
+
+# ---------------------------------------------------------------- 09: mask robustness (paper plan, stage 1)
+mask_nb = nb([
+    md(f'''
+# 09 · Mask robustness: does model B need perfect masks?
+{colab_badge("09_mask_robustness.ipynb")}
+
+**Runtime → T4 GPU → Run all.** ≈ 2.5–3 ч (4 конфигурации × 3 seed по ~10 мин + маски + оценка).
+Повторный Run all безопасен: готовые маски, обученные запуски и предсказания берутся из кэша на Drive,
+прерванное обучение продолжается с последней эпохи.
+
+Модель B вставляет животное на новый фон по маске. В Oxford Pet маски ручные, в реальных данных их нет.
+Обучаем B так же, как `resnet_B`, но с худшими масками **только для замены фона при обучении**:
+
+| конфиг | маска при обучении |
+|---|---|
+| `resnet_B_deeplab` | автоматическая: DeepLabV3 (классы VOC cat + dog), без разметки |
+| `resnet_B_dilate` | ручная, расширенная на 3% стороны фото (вокруг животного остаётся кусок старого фона) |
+| `resnet_B_erode` | ручная, суженная на 3% (обрезан мех по краю) |
+| `resnet_B_box` | прямоугольник вокруг животного (самая грубая маска) |
+
+Тест не меняется: все условия (swapped, fg-only, bg-only) строятся по ручным маскам, поэтому цифры напрямую
+сравнимы с `resnet_A` / `resnet_B` из основной таблицы (они берутся из `results/test/` в репо, не переобучаются).
+
+Чекпоинты: `MyDrive/bgbias/runs_masks/` (отдельно от `runs/`). Маски: `MyDrive/bgbias/data/masks/`.
+Результаты: `results/mask_robustness/`, рисунки `report/figures/fig13_mask_variants.png`,
+`fig14_mask_robustness.png` → push в GitHub.
+'''),
+    SETUP,
+    code('''
+import torch
+assert torch.cuda.is_available(), "Runtime -> Change runtime type -> T4 GPU"
+device = torch.device("cuda")
+'''),
+    PROJECT,
+    md("## 1. Маски для обучения и их качество"),
+    code('''
+import numpy as np
+import pandas as pd
+from bgbias import masks as M
+from bgbias.train import load_config
+
+CONFIGS = ["resnet_B_deeplab", "resnet_B_dilate", "resnet_B_erode", "resnet_B_box"]
+SEEDS = [0, 1, 2]
+configs = {name: load_config(f"{REPO_DIR}/configs/{name}.yaml") for name in CONFIGS}
+
+MASK_DIR = DRIVE_ROOT / "data" / "masks"
+OUT = Path(REPO_DIR) / "results" / "mask_robustness"
+OUT_DRIVE = DRIVE_ROOT / "results" / "mask_robustness"
+for d in (OUT, OUT_DRIVE):
+    d.mkdir(parents=True, exist_ok=True)
+
+train_ids = data.splits["train"]["image_id"].tolist()
+train_masks = {}
+for name, cfg in configs.items():
+    v, frac = cfg["train_mask"], cfg.get("mask_frac", 0.03)
+    if v == "deeplab":
+        train_masks[v] = M.build_deeplab(data.pet_root, train_ids, device, MASK_DIR / "train_deeplab.npz")
+    else:
+        train_masks[v] = M.build_perturbed(data.pet_root, train_ids, v, MASK_DIR / f"train_{v}_{frac}.npz", frac,
+                                           cfg["include_border"])
+    print(v, len(train_masks[v]), "masks")
+'''),
+    code('''
+rows = []
+for i in train_ids:
+    ref = M.human_mask(data.pet_root, i)
+    for v, packed in train_masks.items():
+        q = M.quality(M.unpack_mask(packed[str(i)]), ref)
+        rows.append({"image_id": i, "variant": v, **q, "used": q["area"] > 0.005})
+quality = pd.DataFrame(rows)
+quality_summary = quality.groupby("variant")[["iou", "recall", "precision", "area", "used"]].mean()
+quality_summary = quality_summary.rename(columns={"used": "share_swapped"})   # empty masks -> photo kept
+quality_summary.to_csv(OUT / "mask_quality.csv")
+quality_summary.round(3)
+'''),
+    code('''
+import matplotlib.pyplot as plt
+from bgbias import compose
+from bgbias.plotting import saver, use_style
+
+use_style()
+FIG_DIR = Path(REPO_DIR) / "report" / "figures"
+save = saver(FIG_DIR)
+
+# examples: median-IoU DeepLab image, a bad DeepLab image, two random ones
+dl = quality[quality.variant == "deeplab"].set_index("image_id")["iou"]
+rng = np.random.default_rng(0)
+examples = [dl.sub(dl.median()).abs().idxmin(), dl.idxmin(), *rng.choice(train_ids, 2, replace=False)]
+cols = ["human"] + list(train_masks)
+fig, axes = plt.subplots(len(examples), len(cols), figsize=(2.4 * len(cols), 2.4 * len(examples)))
+for r, image_id in enumerate(examples):
+    img = np.asarray(compose.load_image(data.pet_root / "images" / f"{image_id}.jpg"), dtype=np.float32) / 255
+    ref = M.human_mask(data.pet_root, image_id)
+    for c, v in enumerate(cols):
+        m = ref if v == "human" else M.unpack_mask(train_masks[v][str(image_id)])
+        ax = axes[r, c]
+        ax.imshow(img * (0.35 + 0.65 * m[..., None]))
+        ax.contour(m, levels=[0.5], colors="#eb6834", linewidths=1.2)
+        title = v if v == "human" else f"{v} · IoU {M.quality(m, ref)['iou']:.2f}"
+        ax.set_title(title, fontsize=8)
+        ax.axis("off")
+fig.tight_layout()
+save(fig, "fig13_mask_variants")
+'''),
+    md("## 2. Обучение (seed-major: если Colab оборвётся, у каждого варианта уже будет seed 0)"),
+    code('''
+from bgbias.train import prune_last_checkpoints, train
+
+RUNS_M = DRIVE_ROOT / "runs_masks"
+RUNS_M.mkdir(parents=True, exist_ok=True)
+prune_last_checkpoints(RUNS_M)
+histories = {}
+for seed in SEEDS:
+    for name, cfg in configs.items():
+        run_dir = RUNS_M / f"{name}_seed{seed}"
+        print(f"=== {run_dir.name} ===")
+        histories[(name, seed)] = pd.DataFrame(train(cfg, seed, data, run_dir, device,
+                                                     train_masks=train_masks[cfg["train_mask"]]))
+'''),
+    md("## 3. Оценка на test (ручные маски, как в основной таблице)"),
+    code('''
+from bgbias import analysis as A, evaluate as E
+from bgbias.models import load_checkpoint
+
+tables = {}
+for name in CONFIGS:
+    for seed in SEEDS:
+        run = f"{name}_seed{seed}"
+        cached = OUT_DRIVE / f"{run}_predictions.csv"
+        if cached.exists():
+            table = pd.read_csv(cached)
+        else:
+            model, cfg = load_checkpoint(RUNS_M / run / "best.pt", data.num_classes, device)
+            predict = E.torch_predict_fn(model, data, "test", device, include_border=cfg["include_border"],
+                                         blur_sigma=cfg["blur_sigma"], img_size=cfg["img_size"])
+            table = E.predictions_table(data, "test", predict)
+            table.to_csv(cached, index=False)
+        table.to_csv(OUT / f"{run}_predictions.csv", index=False)
+        tables[run] = table
+# reference models from the main experiment (not retrained)
+for ref in ("resnet_A", "resnet_B"):
+    for seed in SEEDS:
+        run = f"{ref}_seed{seed}"
+        tables[run] = pd.read_csv(Path(REPO_DIR) / "results" / "test" / f"{run}_predictions.csv")
+
+per_run = pd.DataFrame({run: E.summarize(t) for run, t in tables.items()}).T
+per_run["model"] = [A.model_name(r) for r in per_run.index]
+per_run.to_csv(OUT / "summary_per_run.csv")
+ORDER = ["resnet_A", "resnet_B"] + CONFIGS
+COLS = ["acc_original", "acc_swapped", "acc_fgonly", "acc_bgonly", "gap_swap", "flip_swap"]
+summary = per_run.groupby("model")[COLS].agg(["mean", "std"]).loc[ORDER]
+summary.round(4)
+'''),
+    code('''
+# paired bootstrap over test images: is the gap of each mask variant different from B (human mask) and from A?
+rows = []
+for name in CONFIGS:
+    for ref in ("resnet_B", "resnet_A"):
+        b = A.bootstrap_gap_difference(tables, ref, name, n_boot=2000)
+        rows.append({"variant": name, "reference": ref, "gap_ref": b["gap_A"], "gap_variant": b["gap_B"],
+                     "difference": b["difference"], "ci_low": b["ci_low"], "ci_high": b["ci_high"]})
+boot = pd.DataFrame(rows)
+boot.to_csv(OUT / "bootstrap_gap_vs_reference.csv", index=False)
+boot.round(4)
+'''),
+    code('''
+from bgbias.plotting import COLORS, INK2
+
+labels = {"resnet_A": "A: no swap", "resnet_B": "B: human mask"}
+for name, cfg in configs.items():
+    labels[name] = f"B: {cfg['train_mask']}\\n(IoU {quality_summary.loc[cfg['train_mask'], 'iou']:.2f})"
+x = np.arange(len(ORDER))
+fig, axes = plt.subplots(1, 2, figsize=(11, 3.8))
+for ax, col, title in ((axes[0], "gap_swap", "Accuracy drop when the background is swapped (p.p.)"),
+                       (axes[1], "acc_original", "Accuracy on original images (%)")):
+    mean, std = summary[(col, "mean")] * 100, summary[(col, "std")] * 100
+    colors = [COLORS["resnet_A"] if m == "resnet_A" else COLORS["resnet_B"] for m in ORDER]
+    ax.bar(x, mean, yerr=std, color=colors, capsize=3, width=0.65)
+    for xi, m in zip(x, mean):
+        ax.text(xi, m, f"{m:.1f}", ha="center", va="bottom", fontsize=8, color=INK2)
+    ax.set_xticks(x, [labels[m] for m in ORDER], fontsize=8)
+    ax.set_title(title)
+axes[1].set_ylim(80, 95)
+fig.tight_layout()
+save(fig, "fig14_mask_robustness")
+'''),
+    md("## Сохранение и push"),
+    code('''
+import shutil
+from bgbias.github_sync import sync
+
+shutil.copytree(OUT, OUT_DRIVE, dirs_exist_ok=True)
+shutil.copytree(FIG_DIR, DRIVE_ROOT / "figures", dirs_exist_ok=True)
+sync(REPO_DIR, "Mask robustness: model B trained with DeepLab, dilated, eroded and box masks")
+'''),
+])
+
+(OUT / "09_mask_robustness.ipynb").write_text(json.dumps(mask_nb, indent=1, ensure_ascii=False))
+print("ok 09")

@@ -9,13 +9,16 @@ condition:
 """
 from pathlib import Path
 
+import numpy as np
 import torch
+from PIL import Image, ImageFilter
 from torch.utils.data import Dataset
 from torchvision import transforms as T
 from torchvision import tv_tensors
 from torchvision.transforms import v2
 
 from . import compose
+from .masks import unpack_mask
 
 CONDITIONS = ("original", "swapped", "fgonly", "bgonly")
 BG_MODES = ("places", "gray", "blur")
@@ -40,14 +43,18 @@ def build_joint_transform(size=224):
 class PetBackgroundDataset(Dataset):
     def __init__(self, split_df, pet_root, condition="original", transform=None,
                  places_root=None, manifest=None, bg_pool=None, p_swap=0.0,
-                 include_border=True, blur_sigma=1.5, bg_mode="places", return_mask=False):
+                 include_border=True, blur_sigma=1.5, bg_mode="places", return_mask=False, train_masks=None):
         """return_mask: items are (image, pet mask 1xHxW, label); `transform` must then take both
-        (build_joint_transform). Used by the saliency-penalty training on original images."""
+        (build_joint_transform). Used by the saliency-penalty training on original images.
+        train_masks: {image_id: bit-packed binary mask} (bgbias.masks) used ONLY for the training-time background
+        swap instead of the human trimap; every test condition keeps the trimap."""
         assert condition in CONDITIONS, condition
         assert bg_mode in BG_MODES, bg_mode
         assert not return_mask or (condition == "original" and p_swap == 0)
         if condition == "swapped":
             assert manifest is not None and places_root is not None
+        if train_masks is not None:
+            assert p_swap > 0 and bg_mode == "places", "train_masks only change the training background swap"
         if p_swap > 0:
             assert condition == "original"
             if bg_mode == "places":
@@ -64,6 +71,7 @@ class PetBackgroundDataset(Dataset):
         self.return_mask = return_mask
         self.include_border = include_border
         self.blur_sigma = blur_sigma
+        self.train_masks = train_masks
 
     def __len__(self):
         return len(self.df)
@@ -71,6 +79,17 @@ class PetBackgroundDataset(Dataset):
     def _alpha(self, image_id):
         trimap = compose.load_trimap(self.pet_root / "annotations" / "trimaps" / f"{image_id}.png")
         return compose.foreground_alpha(trimap, self.include_border, self.blur_sigma)
+
+    def _swap_alpha(self, image_id):
+        """Mask for the training background swap: the human trimap, or a mask from `train_masks`
+        (same soft edge). None = the mask is (almost) empty, keep the photo as it is."""
+        if self.train_masks is None:
+            return self._alpha(image_id)
+        m = Image.fromarray(unpack_mask(self.train_masks[str(image_id)]).astype(np.uint8) * 255)
+        if self.blur_sigma > 0:
+            m = m.filter(ImageFilter.GaussianBlur(self.blur_sigma))
+        alpha = np.asarray(m, dtype=np.float32) / 255.0
+        return alpha if alpha.mean() > 0.005 else None   # segmentation missed the pet (as on Waterbirds)
 
     def _background(self, rel_path):
         return compose.load_image(self.places_root / rel_path)
@@ -88,7 +107,10 @@ class PetBackgroundDataset(Dataset):
                     return compose.blur_background(img, self._alpha(image_id))
                 bg = self._background(self.bg_pool[torch.randint(len(self.bg_pool), (1,)).item()])
                 offset = tuple(torch.rand(2).tolist())
-                return compose.swap_background(img, self._alpha(image_id), bg, offset)
+                alpha = self._swap_alpha(image_id)
+                if alpha is None:
+                    return img
+                return compose.swap_background(img, alpha, bg, offset)
             return img
         alpha = self._alpha(image_id)
         if self.condition == "swapped":

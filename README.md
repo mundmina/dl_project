@@ -33,6 +33,7 @@ caches dataset archives in `MyDrive/bgbias/data/`.
 | [`06_demo`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/06_demo.ipynb) | Gradio demo: upload a pet photo, swap the background, compare A and B |
 | [`07_case_waterbirds`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/07_case_waterbirds.ipynb) | Case study: our background swap on the Waterbirds shortcut benchmark (worst-group accuracy) |
 | [`08_attribution`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/08_attribution.ipynb) | Interpretability: how much of each decision comes from the pet vs the background (region Shapley for all models, Integrated Gradients for ResNet-18) |
+| [`09_mask_robustness`](https://colab.research.google.com/github/mundmina/dl_project/blob/main/notebooks/09_mask_robustness.ipynb) | Paper, stage 1: model B trained with automatic (DeepLabV3), dilated, eroded and box masks instead of human trimaps; test unchanged |
 
 Notebooks 03–05 push their small outputs (histories, predictions, tables, figures) to this repo at the end;
 this needs a Colab secret `GITHUB_TOKEN` (fine-grained, Contents read/write on this repo).

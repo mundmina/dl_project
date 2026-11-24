@@ -1,0 +1,14 @@
+# Mask robustness (paper plan, stage 1): ResNet-18 B trained with a worse mask for the background swap:
+# human mask grown by 3% of the image side. Must match resnet_B.yaml except name, train_mask and mask_frac. Test conditions still use human trimaps.
+name: resnet_B_dilate
+p_swap: 0.5
+train_mask: dilate
+mask_frac: 0.03
+epochs: 15
+batch_size: 64
+lr_backbone: 1.0e-4
+lr_head: 1.0e-3
+weight_decay: 1.0e-4
+img_size: 224
+include_border: true
+blur_sigma: 1.5

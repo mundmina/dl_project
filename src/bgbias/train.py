@@ -86,7 +86,8 @@ def prune_last_checkpoints(runs_dir):
     return freed
 
 
-def train(cfg, seed, data, run_dir, device=None):
+def train(cfg, seed, data, run_dir, device=None, train_masks=None):
+    """train_masks: optional {image_id: packed mask} for the training background swap (bgbias.masks)."""
     device = device or torch.device("cuda" if torch.cuda.is_available() else "cpu")
     run_dir = Path(run_dir)
     run_dir.mkdir(parents=True, exist_ok=True)
@@ -102,7 +103,8 @@ def train(cfg, seed, data, run_dir, device=None):
     assert not (rrr > 0 and cfg.get("cutmix", 0.0) > 0), "saliency penalty and CutMix are not combined"
     use_amp = device.type == "cuda" and rrr == 0
     train_loader = make_loader(make_dataset(data, "train", train=True, p_swap=cfg["p_swap"],
-                                            bg_mode=cfg.get("bg_mode", "places"), return_mask=rrr > 0, **common),
+                                            bg_mode=cfg.get("bg_mode", "places"), return_mask=rrr > 0,
+                                            train_masks=train_masks, **common),
                                cfg["batch_size"], True, seed, workers)
     # val swapped is for monitoring only; checkpoints are selected on val original.
     val_loaders = {c: make_loader(make_dataset(data, "val", condition=c, **common),
