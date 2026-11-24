@@ -1,0 +1,41 @@
+comparison,model_a,model_b,condition,metric,difference,ci_low,ci_high
+ResNet-18,resnet_A,resnet_B,original,bg_share,0.027951857,0.025781859,0.030107832
+ResNet-18,resnet_A,resnet_B,original,phi_bg,0.10083994,0.090303056,0.11141297
+ResNet-18,resnet_A,resnet_B,swapped,bg_share,0.057522085,0.054982923,0.060116425
+ResNet-18,resnet_A,resnet_B,swapped,phi_bg,-0.34839484,-0.36569828,-0.33179867
+ResNet-18 (scratch),scratch_A,scratch_B,original,bg_share,0.083843656,0.07918879,0.08827786
+ResNet-18 (scratch),scratch_A,scratch_B,original,phi_bg,0.57778656,0.54018706,0.61424106
+ResNet-18 (scratch),scratch_A,scratch_B,swapped,bg_share,0.09156576,0.08674765,0.09623521
+ResNet-18 (scratch),scratch_A,scratch_B,swapped,phi_bg,0.22285506,0.17962044,0.2669112
+ResNet-50,resnet50_A,resnet50_B,original,bg_share,0.020019244,0.0184057,0.021677146
+ResNet-50,resnet50_A,resnet50_B,original,phi_bg,0.0053288564,-0.0007420409,0.011288617
+ResNet-50,resnet50_A,resnet50_B,swapped,bg_share,0.05030138,0.04824998,0.0524643
+ResNet-50,resnet50_A,resnet50_B,swapped,phi_bg,-0.1377857,-0.14876643,-0.12695965
+ConvNeXt-T,convnext_A,convnext_B,original,bg_share,0.013976963,0.012257049,0.01587042
+ConvNeXt-T,convnext_A,convnext_B,original,phi_bg,-0.07801355,-0.08613317,-0.06942921
+ConvNeXt-T,convnext_A,convnext_B,swapped,bg_share,0.025228277,0.023189668,0.027321337
+ConvNeXt-T,convnext_A,convnext_B,swapped,phi_bg,-0.10758916,-0.11863,-0.09677565
+Swin-T,swin_A,swin_B,original,bg_share,0.027498636,0.024925414,0.029945139
+Swin-T,swin_A,swin_B,original,phi_bg,-0.04359572,-0.06019965,-0.02681677
+Swin-T,swin_A,swin_B,swapped,bg_share,0.049322154,0.046105463,0.052717425
+Swin-T,swin_A,swin_B,swapped,phi_bg,-0.25677556,-0.28481427,-0.2303833
+CutMix,resnet_A,resnet_cutmix,original,bg_share,-0.029807908,-0.0318589,-0.027558539
+CutMix,resnet_A,resnet_cutmix,original,phi_bg,-0.15425256,-0.1656642,-0.14198904
+CutMix,resnet_A,resnet_cutmix,swapped,bg_share,-0.011682,-0.013785825,-0.009472715
+CutMix,resnet_A,resnet_cutmix,swapped,phi_bg,-0.10785278,-0.11891821,-0.096468516
+Blurred background,resnet_A,resnet_blur,original,bg_share,0.014805915,0.012606652,0.016997563
+Blurred background,resnet_A,resnet_blur,original,phi_bg,0.17513946,0.16383651,0.18627287
+Blurred background,resnet_A,resnet_blur,swapped,bg_share,-0.014974543,-0.016950864,-0.013085446
+Blurred background,resnet_A,resnet_blur,swapped,phi_bg,0.003431824,-0.0069889897,0.013244892
+Gray background,resnet_A,resnet_gray,original,bg_share,-0.014736632,-0.017905671,-0.011770092
+Gray background,resnet_A,resnet_gray,original,phi_bg,-0.20603216,-0.22197473,-0.19094206
+Gray background,resnet_A,resnet_gray,swapped,bg_share,-0.005532742,-0.008506222,-0.002560609
+Gray background,resnet_A,resnet_gray,swapped,phi_bg,-0.38566637,-0.4014103,-0.37051812
+"Saliency penalty, λ = 1",resnet_A,resnet_rrr1,original,bg_share,0.009390884,0.007275861,0.011630649
+"Saliency penalty, λ = 1",resnet_A,resnet_rrr1,original,phi_bg,0.0821678,0.07057092,0.09397753
+"Saliency penalty, λ = 1",resnet_A,resnet_rrr1,swapped,bg_share,-0.0030470619,-0.0051276074,-0.0008348542
+"Saliency penalty, λ = 1",resnet_A,resnet_rrr1,swapped,phi_bg,-0.13403827,-0.14475347,-0.123137206
+"Saliency penalty, λ = 10",resnet_A,resnet_rrr10,original,bg_share,-0.02020243,-0.023032801,-0.017341457
+"Saliency penalty, λ = 10",resnet_A,resnet_rrr10,original,phi_bg,-0.20971113,-0.22570321,-0.1936542
+"Saliency penalty, λ = 10",resnet_A,resnet_rrr10,swapped,bg_share,-0.016848847,-0.019961998,-0.013702221
+"Saliency penalty, λ = 10",resnet_A,resnet_rrr10,swapped,phi_bg,-0.5101437,-0.52758807,-0.49255255
