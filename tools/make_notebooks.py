@@ -2028,3 +2028,239 @@ sync(REPO_DIR, "Mask robustness: model B trained with DeepLab, dilated, eroded a
 
 (OUT / "09_mask_robustness.ipynb").write_text(json.dumps(mask_nb, indent=1, ensure_ascii=False))
 print("ok 09")
+
+
+# ---------------------------------------------------------------- 10: cue or distractor (paper, controlled cue)
+cue_nb = nb([
+    md(f'''
+# 10 · Cue or distractor? A controlled background cue
+{colab_badge("10_cue_or_distractor.ipynb")}
+
+**Runtime → T4 GPU → Run all.** ≈ 2–2.5 ч (3 конфигурации × 3 seed по ~10 мин + оценка ~20 мин).
+Повторный Run all безопасен: обученные запуски пропускаются, прерванное обучение продолжается.
+
+**Идея.** Модель может зависеть от фона двумя разными способами:
+- **подсказка (cue)** — фон предсказывает породу, и модель этим пользуется (shortcut);
+- **помеха (distractor)** — фон о породе ничего не говорит, но незнакомая сцена сбивает модель.
+
+Наша ResNet-18 A похожа на помеху. Чтобы проверить, что диагностика различает эти случаи, мы **создаём подсказку
+известной силы**: у каждой породы своя «домашняя» сцена (категория Places365). При замене фона (p = 0.5, как у B)
+с вероятностью ρ новая сцена берётся из домашней категории породы.
+
+| конфиг | ρ |
+|---|---|
+| `resnet_B` (уже обучена, не переобучается) | 0 |
+| `cue_rho050` | 0.5 |
+| `cue_rho090` | 0.9 |
+| `cue_rho100` | 1.0 |
+
+Для сравнения оцениваются также `resnet_A`, `scratch_A`, `scratch_B` (чекпоинты из `MyDrive/dl/runs.zip`).
+
+**Тест** (ручные маски): обычные original / fg-only / bg-only / swapped + три новых условия:
+`congruent` — животное на сцене своей домашней категории (новые, не виденные при обучении фото этой категории);
+`conflict` — на домашней сцене **другой** породы; и их bg-only варианты.
+
+**Диагностика:** cue score = точность по одному домашнему фону − случайная (1/37); conflict follow = доля ответов
+«порода, чья это сцена»; distraction score = −φ_bg чужой сцены (Shapley, наты). Плюс доля Grad-CAM на животном.
+
+Результаты: `results/cue/`, рисунок `report/figures/fig15_cue_vs_distractor.png` → push в GitHub.
+'''),
+    SETUP,
+    code('''
+import torch
+assert torch.cuda.is_available(), "Runtime -> Change runtime type -> T4 GPU"
+device = torch.device("cuda")
+'''),
+    PROJECT,
+    md("## 1. Домашние сцены и тестовый манифест"),
+    code('''
+import dataclasses
+import numpy as np
+import pandas as pd
+from bgbias import cue as C
+
+home_train, home_test, home_table = C.make_home_scenes(data.pools, data.num_classes, seed=0)
+data_cue = dataclasses.replace(data, pools=C.pools_without_heldout(data.pools, home_test))
+manifest = C.make_cue_manifest(data.splits["test"], home_test, seed=1)
+
+OUT = Path(REPO_DIR) / "results" / "cue"
+OUT_DRIVE = DRIVE_ROOT / "results" / "cue"
+for d in (OUT, OUT_DRIVE):
+    d.mkdir(parents=True, exist_ok=True)
+breeds = data.splits["train"].drop_duplicates("label").set_index("label")["breed"].sort_index()
+home_table["breed"] = home_table["label"].map(breeds)
+home_table.to_csv(OUT / "home_scenes.csv", index=False)
+manifest.to_csv(OUT / "test_manifest.csv", index=False)
+print(len(data.bg_pool("train")), "->", len(data_cue.bg_pool("train")), "random training scenes (held-out removed)")
+home_table.head(10)
+'''),
+    md("## 2. Обучение (seed-major)"),
+    code('''
+from bgbias.train import load_config, prune_last_checkpoints, train
+
+CONFIGS = ["cue_rho050", "cue_rho090", "cue_rho100"]
+SEEDS = [0, 1, 2]
+configs = {name: load_config(f"{REPO_DIR}/configs/{name}.yaml") for name in CONFIGS}
+RUNS_C = DRIVE_ROOT / "runs_cue"
+RUNS_C.mkdir(parents=True, exist_ok=True)
+prune_last_checkpoints(RUNS_C)
+for seed in SEEDS:
+    for name, cfg in configs.items():
+        run_dir = RUNS_C / f"{name}_seed{seed}"
+        print(f"=== {run_dir.name} ===")
+        train(cfg, seed, data_cue, run_dir, device, home_bgs=home_train)
+'''),
+    md("## 3. Чекпоинты для оценки"),
+    code('''
+import shutil, zipfile
+ARCHIVE = Path("/content/drive/MyDrive/dl/runs.zip")
+CKPT = Path("/content/ckpt")
+REFERENCE = ["resnet_A", "resnet_B", "scratch_A", "scratch_B"]
+
+members = {}
+if ARCHIVE.exists():
+    with zipfile.ZipFile(ARCHIVE) as z:
+        members = {n.split("/")[-2]: n for n in z.namelist() if n.endswith("/best.pt")}
+
+def checkpoint(run):
+    if (RUNS_C / run / "best.pt").exists():
+        return RUNS_C / run / "best.pt"
+    dst = CKPT / run / "best.pt"
+    if not dst.exists() and run in members:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        with zipfile.ZipFile(ARCHIVE) as z, z.open(members[run]) as src, open(dst, "wb") as out:
+            shutil.copyfileobj(src, out)
+    return dst if dst.exists() else None
+
+paths = {}
+for m in REFERENCE + CONFIGS:
+    for s in SEEDS:
+        p = checkpoint(f"{m}_seed{s}")
+        if p is None:
+            print("missing", f"{m}_seed{s}")
+        else:
+            paths[f"{m}_seed{s}"] = p
+print(len(paths), "checkpoints")
+'''),
+    md("## 4. Оценка: 10 вариантов каждой тестовой картинки, все модели за один проход"),
+    code('''
+from torch.utils.data import DataLoader
+from bgbias import analysis as A
+from bgbias.models import load_checkpoint
+from bgbias.project import make_dataset
+
+models = {run: load_checkpoint(p, data.num_classes, device)[0] for run, p in paths.items()}
+views_ds = C.CueViews(make_dataset(data, "test", condition="swapped"), manifest)
+loader = DataLoader(views_ds, batch_size=16, shuffle=False, num_workers=2, pin_memory=True)
+
+parts = {run: [] for run in models}
+for b, (views, mask, y, y_conf) in enumerate(loader):
+    views, yd, ycd = views.to(device, non_blocking=True), y.to(device), y_conf.to(device)
+    for run, model in models.items():
+        with torch.autocast("cuda", dtype=torch.float16):
+            pred, lp, lpc = C.view_outputs(model, views, yd, ycd)
+        parts[run].append(C.per_image_table(pred.cpu(), lp.float().cpu(), lpc.float().cpu(), y, y_conf))
+    if b % 25 == 0:
+        print(f"batch {b + 1}/{len(loader)}")
+
+per_image = {run: pd.concat(t, ignore_index=True) for run, t in parts.items()}
+pd.concat([t.assign(run=r) for r, t in per_image.items()]).to_csv(OUT_DRIVE / "per_image.csv.gz", index=False)
+per_run = pd.DataFrame({run: C.summarize(t) for run, t in per_image.items()}).T
+per_run["model"] = [A.model_name(r) for r in per_run.index]
+per_run.to_csv(OUT / "summary_per_run.csv")
+ORDER = ["resnet_A", "scratch_A", "scratch_B", "resnet_B"] + CONFIGS
+KEY = ["acc_original", "acc_swapped", "acc_congruent", "acc_conflict", "acc_bgonly", "acc_congruent_bgonly",
+       "follow_conflict", "phi_bg_own", "phi_bg_foreign", "phi_bg_congruent", "phi_bg_conflict",
+       "cue_score", "distraction_score"]
+summary = per_run.groupby("model")[KEY].agg(["mean", "std"]).reindex(ORDER)
+summary.to_csv(OUT / "summary.csv")
+summary.xs("mean", axis=1, level=1).round(3)
+'''),
+    md("## 5. Grad-CAM: видит ли тепловая карта разницу? (500 тестовых картинок)"),
+    code('''
+from bgbias.gradcam import GradCAM
+
+rng = np.random.default_rng(0)
+idx = np.sort(rng.choice(len(views_ds), 500, replace=False))
+sub = torch.utils.data.Subset(views_ds, idx)
+gl = DataLoader(sub, batch_size=16, shuffle=False, num_workers=2)
+use = {v: C.VIEWS.index(v) for v in ("original", "congruent", "swapped")}
+cam_rows = []
+for run, model in models.items():
+    cam = GradCAM(model)
+    shares = {v: [] for v in use}
+    for views, mask, y, _ in gl:
+        m = mask.to(device)
+        for v, j in use.items():
+            c, _ = cam(views[:, j].to(device))
+            shares[v].append(((c * m).flatten(1).sum(1) / c.flatten(1).sum(1).clamp_min(1e-8)).cpu())
+    cam.remove()
+    cam_rows.append({"run": run, "model": A.model_name(run),
+                     **{f"cam_on_pet_{v}": torch.cat(s).mean().item() for v, s in shares.items()}})
+cams = pd.DataFrame(cam_rows)
+cams.to_csv(OUT / "gradcam_per_run.csv", index=False)
+cams.groupby("model").mean(numeric_only=True).reindex(ORDER).round(3)
+'''),
+    md("## 6. Рисунок: карта «подсказка × помеха»"),
+    code('''
+import matplotlib.pyplot as plt
+from bgbias.plotting import INK2, saver, use_style
+
+use_style()
+FIG_DIR = Path(REPO_DIR) / "report" / "figures"
+save = saver(FIG_DIR)
+NAMES = {"resnet_A": "A (no swap)", "scratch_A": "scratch A", "scratch_B": "scratch B", "resnet_B": "B, ρ = 0",
+         "cue_rho050": "ρ = 0.5", "cue_rho090": "ρ = 0.9", "cue_rho100": "ρ = 1.0"}
+COL = {"resnet_A": "#2a78d6", "scratch_A": "#7aa6e0", "scratch_B": "#f0a27f", "resnet_B": "#eb6834",
+       "cue_rho050": "#b58cd6", "cue_rho090": "#8a55c2", "cue_rho100": "#5b2a9a"}
+models_present = [m for m in ORDER if m in summary.index and not summary.loc[m].isna().all()]
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4.3))
+ax = axes[0]
+for m in models_present:
+    r = summary.loc[m]
+    ax.errorbar(r[("distraction_score", "mean")], r[("cue_score", "mean")] * 100,
+                xerr=r[("distraction_score", "std")], yerr=r[("cue_score", "std")] * 100,
+                fmt="o", ms=8, color=COL[m], capsize=3)
+    ax.annotate(NAMES[m], (r[("distraction_score", "mean")], r[("cue_score", "mean")] * 100),
+                textcoords="offset points", xytext=(6, 4), fontsize=8, color=INK2)
+ax.axhline(0, color=INK2, lw=0.8); ax.axvline(0, color=INK2, lw=0.8)
+ax.set_xlabel("distraction: −φ_bg of a foreign scene (nats)")
+ax.set_ylabel("cue: home-scene-only accuracy − chance (p.p.)")
+ax.set_title("Cue vs distractor")
+
+ax = axes[1]
+x = np.arange(len(models_present))
+for k, (col, lab) in enumerate((("follow_conflict", "conflict: predicts the scene's breed"),
+                                ("gap_conflict", "conflict: accuracy drop"))):
+    if col not in per_run:
+        continue
+    vals = per_run.groupby("model")[col].agg(["mean", "std"]).reindex(models_present) * 100
+    ax.bar(x + (k - 0.5) * 0.38, vals["mean"], 0.38, yerr=vals["std"], capsize=2,
+           color=["#5b2a9a", "#bbb"][k], label=lab)
+ax.set_xticks(x, [NAMES[m] for m in models_present], rotation=30, ha="right", fontsize=8)
+ax.set_title("Pet on another breed's home scene (%)"); ax.legend(fontsize=8)
+
+ax = axes[2]
+cm = cams.groupby("model")[["cam_on_pet_original", "cam_on_pet_congruent"]].agg(["mean", "std"]).reindex(models_present)
+for k, v in enumerate(("original", "congruent")):
+    ax.bar(x + (k - 0.5) * 0.38, cm[(f"cam_on_pet_{v}", "mean")] * 100, 0.38,
+           yerr=cm[(f"cam_on_pet_{v}", "std")] * 100, capsize=2, color=["#999", "#5b2a9a"][k], label=v)
+ax.set_ylim(50, 100)
+ax.set_xticks(x, [NAMES[m] for m in models_present], rotation=30, ha="right", fontsize=8)
+ax.set_title("Grad-CAM mass on the pet (%)"); ax.legend(fontsize=8)
+fig.tight_layout()
+save(fig, "fig15_cue_vs_distractor")
+'''),
+    md("## Сохранение и push"),
+    code('''
+from bgbias.github_sync import sync
+
+shutil.copytree(OUT, OUT_DRIVE, dirs_exist_ok=True)
+shutil.copytree(FIG_DIR, DRIVE_ROOT / "figures", dirs_exist_ok=True)
+sync(REPO_DIR, "Cue or distractor: controlled background cue (rho = 0.5, 0.9, 1.0) and the diagnostic")
+'''),
+])
+
+(OUT / "10_cue_or_distractor.ipynb").write_text(json.dumps(cue_nb, indent=1, ensure_ascii=False))
+print("ok 10")

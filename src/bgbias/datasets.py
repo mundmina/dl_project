@@ -43,16 +43,22 @@ def build_joint_transform(size=224):
 class PetBackgroundDataset(Dataset):
     def __init__(self, split_df, pet_root, condition="original", transform=None,
                  places_root=None, manifest=None, bg_pool=None, p_swap=0.0,
-                 include_border=True, blur_sigma=1.5, bg_mode="places", return_mask=False, train_masks=None):
+                 include_border=True, blur_sigma=1.5, bg_mode="places", return_mask=False, train_masks=None,
+                 home_bgs=None, rho=0.0):
         """return_mask: items are (image, pet mask 1xHxW, label); `transform` must then take both
         (build_joint_transform). Used by the saliency-penalty training on original images.
         train_masks: {image_id: bit-packed binary mask} (bgbias.masks) used ONLY for the training-time background
-        swap instead of the human trimap; every test condition keeps the trimap."""
+        swap instead of the human trimap; every test condition keeps the trimap.
+        home_bgs, rho: controlled background cue (bgbias.cue). When the background is swapped, with probability `rho`
+        the new scene comes from the breed's own "home" scene category (home_bgs[label] = list of paths), otherwise
+        from the random pool as usual. rho = 0 is exactly the normal swap."""
         assert condition in CONDITIONS, condition
         assert bg_mode in BG_MODES, bg_mode
         assert not return_mask or (condition == "original" and p_swap == 0)
         if condition == "swapped":
             assert manifest is not None and places_root is not None
+        if home_bgs is not None:
+            assert p_swap > 0 and bg_mode == "places" and 0 <= rho <= 1
         if train_masks is not None:
             assert p_swap > 0 and bg_mode == "places", "train_masks only change the training background swap"
         if p_swap > 0:
@@ -72,6 +78,8 @@ class PetBackgroundDataset(Dataset):
         self.include_border = include_border
         self.blur_sigma = blur_sigma
         self.train_masks = train_masks
+        self.home_bgs = home_bgs
+        self.rho = rho
 
     def __len__(self):
         return len(self.df)
@@ -105,7 +113,11 @@ class PetBackgroundDataset(Dataset):
                     return compose.foreground_only(img, self._alpha(image_id))
                 if self.bg_mode == "blur":
                     return compose.blur_background(img, self._alpha(image_id))
-                bg = self._background(self.bg_pool[torch.randint(len(self.bg_pool), (1,)).item()])
+                if self.home_bgs is not None and torch.rand(1).item() < self.rho:
+                    home = self.home_bgs[int(self.df.at[idx, "label"])]
+                    bg = self._background(home[torch.randint(len(home), (1,)).item()])
+                else:
+                    bg = self._background(self.bg_pool[torch.randint(len(self.bg_pool), (1,)).item()])
                 offset = tuple(torch.rand(2).tolist())
                 alpha = self._swap_alpha(image_id)
                 if alpha is None:
